@@ -4,7 +4,7 @@ const merkle = @import("merkle.zig");
 const challenger_mod = @import("challenger.zig");
 const utils = @import("utils.zig");
 
-const T = complex.c32;
+pub const T = complex.c32;
 
 fn leafDigestPairT(even: T, odd: T) merkle.Digest {
     const n = @sizeOf(T);
@@ -19,23 +19,6 @@ fn leafDigestPairT(even: T, odd: T) merkle.Digest {
     @memcpy(buf[n..two_n], &b);
 
     return merkle.hashBytes(&buf);
-}
-
-// Probably move this to complex.zig.
-/// Build roots w^k in bit-reversed order.
-fn makeRootsBitrev(allocator: std.mem.Allocator, n: usize) ![]T {
-    std.debug.assert(utils.isPowerOfTwo(n));
-    var xs = try allocator.alloc(T, n);
-
-    const omega = T.root(n);
-    xs[0] = T.one;
-    var i: usize = 1;
-    while (i < n) : (i += 1) {
-        xs[i] = xs[i - 1].mul(omega);
-    }
-
-    utils.bitReversePermute(T, xs);
-    return xs;
 }
 
 /// For a pair-leaf row index `row` in [0..n/2),
@@ -302,7 +285,7 @@ pub fn prove(
             paths_cursor += depth_i;
 
             var tmp_buf: [64]merkle.Digest = undefined;
-            const got_depth = try layers_trees[i].open(pair_idx, tmp_buf[0..]);
+            const got_depth = try layers_trees[i].open(pair_idx, &tmp_buf);
             std.debug.assert(got_depth == depth_i);
             @memcpy(path, tmp_buf[0..depth_i]);
 
@@ -333,7 +316,7 @@ pub fn prove(
     };
 }
 
-pub fn verify(cfg: Config, proof: Proof) bool {
+pub fn verify(allocator: std.mem.Allocator, cfg: Config, proof: Proof) bool {
     const n0 = cfg.n();
     const n_fin = cfg.finalN();
     const R = cfg.rounds();
@@ -345,8 +328,8 @@ pub fn verify(cfg: Config, proof: Proof) bool {
     var ch = challenger_mod.Challenger.init();
 
     // Recompute betas from roots.
-    var betas = std.heap.page_allocator.alloc(T, R) catch return false;
-    defer std.heap.page_allocator.free(betas);
+    var betas = allocator.alloc(T, R) catch return false;
+    defer allocator.free(betas);
 
     var i: usize = 0;
     while (i < R) : (i += 1) {
@@ -384,7 +367,7 @@ pub fn verify(cfg: Config, proof: Proof) bool {
             // Verify Merkle path against root[i].
             const leaf = leafDigestPairT(opening_i.even, opening_i.odd);
             const recomputed = merkle.MerkleTree.rootFromProofDigest(leaf, pair_idx, opening_i.path);
-            if (!std.mem.eql(u8, recomputed[0..], proof.roots[i][0..])) return false;
+            if (!std.mem.eql(u8, &recomputed, &proof.roots[i])) return false;
 
             // Compute expected next.
             const lo = opening_i.even;
@@ -419,8 +402,8 @@ pub fn verify(cfg: Config, proof: Proof) bool {
     // Final degree check via IFFT.
     // `final_evals` are in bit-reversed order (by construction of folding).
     // IFFT(bitrev) -> coefficients in natural order.
-    var coeffs = std.heap.page_allocator.alloc(T, n_fin) catch return false;
-    defer std.heap.page_allocator.free(coeffs);
+    var coeffs = allocator.alloc(T, n_fin) catch return false;
+    defer allocator.free(coeffs);
     @memcpy(coeffs, proof.final_evals);
 
     fftBitrevInPlace(coeffs, true);
@@ -435,20 +418,9 @@ pub fn verify(cfg: Config, proof: Proof) bool {
     return true;
 }
 
-// Tests.
-
-/// Horner-evaluate polynomial.
-fn evalPoly(coeffs: []const T, x: T) T {
-    var acc = T.zero;
-    var i: usize = coeffs.len;
-    while (i > 0) {
-        i -= 1;
-        acc = acc.mul(x).add(coeffs[i]);
-    }
-    return acc;
-}
-
 test "aFRI accepts low-degree polynomial (small params)" {
+    const allocator = std.testing.allocator;
+
     const cfg: Config = .{
         .log_n = 6, // n = 64
         .log_final_n = 3, // n_fin = 8, R = 3
@@ -461,7 +433,7 @@ test "aFRI accepts low-degree polynomial (small params)" {
     const n0 = cfg.n();
 
     // Build domain points in bitrev order.
-    const xs = try makeRootsBitrev(std.testing.allocator, n0);
+    const xs = try complex.makeRootsBitrevAlloc(T, allocator, n0);
     defer std.testing.allocator.free(xs);
 
     // Random polynomial coefficients (deterministic seed)
@@ -480,14 +452,14 @@ test "aFRI accepts low-degree polynomial (small params)" {
     const f0 = try std.testing.allocator.alloc(T, n0);
     defer std.testing.allocator.free(f0);
 
-    for (f0, 0..) |*out, i| {
-        out.* = evalPoly(&coeffs, xs[i]);
+    for (f0, xs) |*out, x| {
+        out.* = complex.evalPoly(T, &coeffs, x);
     }
 
     var proof = try prove(std.testing.allocator, cfg, f0);
     defer proof.deinit(std.testing.allocator);
 
-    try std.testing.expect(verify(cfg, proof));
+    try std.testing.expect(verify(allocator, cfg, proof));
 }
 
 test "aFRI rejects if a query opening is tampered (Merkle mismatch or fold mismatch)" {
@@ -503,7 +475,7 @@ test "aFRI rejects if a query opening is tampered (Merkle mismatch or fold misma
     const n0 = cfg.n();
 
     // Domain points in bitrev order.
-    const xs = try makeRootsBitrev(std.testing.allocator, n0);
+    const xs = try complex.makeRootsBitrevAlloc(T, std.testing.allocator, n0);
     defer std.testing.allocator.free(xs);
 
     // Deterministic polynomial
@@ -519,19 +491,19 @@ test "aFRI rejects if a query opening is tampered (Merkle mismatch or fold misma
 
     const f0 = try std.testing.allocator.alloc(T, n0);
     defer std.testing.allocator.free(f0);
-    for (f0, 0..) |*out, i| out.* = evalPoly(&coeffs, xs[i]);
+    for (f0, xs) |*out, x| out.* = complex.evalPoly(T, &coeffs, x);
 
     var proof = try prove(std.testing.allocator, cfg, f0);
     defer proof.deinit(std.testing.allocator);
 
     // Sanity: valid proof should verify.
-    try std.testing.expect(verify(cfg, proof));
+    try std.testing.expect(verify(std.testing.allocator, cfg, proof));
 
     // Tamper with a single opened value in the very first query, first layer.
     // This should (almost surely) invalidate the Merkle proof for that layer.
     proof.queries[0].openings[0].even.re += 0.1234;
 
-    try std.testing.expect(!verify(cfg, proof));
+    try std.testing.expect(!verify(std.testing.allocator, cfg, proof));
 }
 
 test "aFRI rejects if final layer is tampered (final degree check fails)" {
@@ -548,7 +520,7 @@ test "aFRI rejects if final layer is tampered (final degree check fails)" {
 
     const n0 = cfg.n();
 
-    const xs = try makeRootsBitrev(std.testing.allocator, n0);
+    const xs = try complex.makeRootsBitrevAlloc(T, std.testing.allocator, n0);
     defer std.testing.allocator.free(xs);
 
     var prng = std.Random.DefaultPrng.init(0x1234_5678_9abc_def0);
@@ -563,18 +535,18 @@ test "aFRI rejects if final layer is tampered (final degree check fails)" {
 
     const f0 = try std.testing.allocator.alloc(T, n0);
     defer std.testing.allocator.free(f0);
-    for (f0, 0..) |*out, i| out.* = evalPoly(&coeffs, xs[i]);
+    for (f0, xs) |*out, x| out.* = complex.evalPoly(T, &coeffs, x);
 
     var proof = try prove(std.testing.allocator, cfg, f0);
     defer proof.deinit(std.testing.allocator);
 
     // Sanity: valid proof should verify
-    try std.testing.expect(verify(cfg, proof));
+    try std.testing.expect(verify(std.testing.allocator, cfg, proof));
 
     // Tamper with one final evaluation entry.
     // Since verifier uses final_evals for the terminal IFFT/degree bound check,
     // this should cause coefficients above the bound to become non-negligible.
     proof.final_evals[0].re += 0.25;
 
-    try std.testing.expect(!verify(cfg, proof));
+    try std.testing.expect(!verify(std.testing.allocator, cfg, proof));
 }

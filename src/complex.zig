@@ -138,6 +138,52 @@ pub fn Complex(comptime InnerTypeIn: type) type {
     };
 }
 
+/// Build roots w^k in bit-reversed order.
+pub fn makeRootsBitrevAlloc(
+    comptime C: type,
+    allocator: std.mem.Allocator,
+    n: usize,
+) ![]C {
+    std.debug.assert(utils.isPowerOfTwo(n));
+    var xs = try allocator.alloc(C, n);
+
+    const omega = C.root(n);
+    xs[0] = C.one;
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        xs[i] = xs[i - 1].mul(omega);
+    }
+
+    utils.bitReversePermute(C, xs);
+    return xs;
+}
+
+/// `T` - complex number type (derivative of aFRI's Complex).
+pub fn makeRootsBitrev(comptime C: type, n: comptime_int) [n]C {
+    var xs: [n]C = undefined;
+
+    const omega = C.root(n);
+    xs[0] = C.one;
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        xs[i] = xs[i - 1].mul(omega);
+    }
+
+    utils.bitReversePermute(C, &xs);
+    return xs;
+}
+
+/// Horner-evaluate polynomial.
+pub fn evalPoly(comptime C: type, coeffs: []const C, x: C) C {
+    var acc = C.zero;
+    var i: usize = coeffs.len;
+    while (i > 0) {
+        i -= 1;
+        acc = acc.mul(x).add(coeffs[i]);
+    }
+    return acc;
+}
+
 fn expectApproxZeroAbs(a: f32, tol: f32) !void {
     try std.testing.expectApproxEqAbs(a, 0.0, tol);
 }
