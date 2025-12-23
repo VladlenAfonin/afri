@@ -34,6 +34,10 @@ pub fn build(b: *std.Build) void {
     bench.root_module.addImport("zbench", zbench);
 
     const run = b.addRunArtifact(bench);
+    if (b.args) |args| {
+        run.addArgs(args);
+    }
+
     const run_step = b.step("bench", "Run the benchmarks");
     run_step.dependOn(&run.step);
 }

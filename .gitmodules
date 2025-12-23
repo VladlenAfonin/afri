@@ -1,0 +1,3 @@
+[submodule "ext/zBench"]
+	path = ext/zBench
+	url = git@github.com:VladlenAfonin/zBench.git
