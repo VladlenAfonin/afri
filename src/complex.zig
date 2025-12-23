@@ -67,6 +67,10 @@ pub fn Complex(comptime InnerTypeIn: type) type {
             };
         }
 
+        pub inline fn mulAssign(self: *Self, other: Self) void {
+            self.* = self.*.mul(other);
+        }
+
         pub inline fn scaleAssign(self: *Self, s: InnerType) void {
             self.* = self.*.scale(s);
         }

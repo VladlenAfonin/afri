@@ -71,8 +71,8 @@ fn foldLayerInPlace(
 /// In-place radix-2 DIT FFT.
 /// Assumes input is in bit-reversed order; output is in natural order.
 /// If inverse=true, computes inverse FFT and divides by n.
-fn fftBitrevInPlace(a: []T, inverse: bool) void {
-    const n = a.len;
+fn fftBitrevInPlace(xs: []T, inverse: bool) void {
+    const n = xs.len;
     std.debug.assert(utils.isPowerOfTwo(n));
     if (n == 1) return;
 
@@ -87,18 +87,18 @@ fn fftBitrevInPlace(a: []T, inverse: bool) void {
             var w = T.one;
             var j: usize = 0;
             while (j < len / 2) : (j += 1) {
-                const u = a[i + j];
-                const v = a[i + j + len / 2].mul(w);
-                a[i + j] = u.add(v);
-                a[i + j + len / 2] = u.sub(v);
-                w = w.mul(wlen);
+                const u = xs[i + j];
+                const v = xs[i + j + len / 2].mul(w);
+                xs[i + j] = u.add(v);
+                xs[i + j + len / 2] = u.sub(v);
+                w.mulAssign(wlen);
             }
         }
     }
 
     if (inverse) {
         const inv_n: T.InnerType = 1.0 / @as(T.InnerType, @floatFromInt(n));
-        for (a) |*z| z.scaleAssign(inv_n);
+        for (xs) |*z| z.scaleAssign(inv_n);
     }
 }
 
@@ -316,7 +316,11 @@ pub fn prove(
     };
 }
 
-pub fn verify(allocator: std.mem.Allocator, cfg: Config, proof: Proof) bool {
+pub fn verify(
+    allocator: std.mem.Allocator,
+    cfg: Config,
+    proof: Proof,
+) bool {
     const n0 = cfg.n();
     const n_fin = cfg.finalN();
     const R = cfg.rounds();
