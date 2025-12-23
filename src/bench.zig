@@ -18,16 +18,22 @@ const Arguments = struct {
     party: Party = .prover,
     log_n_from: u6 = 16,
     log_n_to: u6 = 26,
+    budget_s: u64 = 2,
+    help: bool = false,
 
     const Self = @This();
 
     const ParseError = error{
+        AllocatorError,
         ExpectedArgument,
         InvalidArgument,
     };
 
     pub fn parse(allocator: std.mem.Allocator) ParseError!Self {
-        var args = try std.process.argsWithAllocator(allocator);
+        var args = std.process.argsWithAllocator(allocator) catch |e| {
+            std.debug.panic("unable to allocate memory: {}\n", .{e});
+            return ParseError.AllocatorError;
+        };
         defer args.deinit();
         _ = args.next();
 
@@ -48,6 +54,14 @@ const Arguments = struct {
 
             if (contains(arg, &[_][]const u8{"--to"})) {
                 result.log_n_to = try parseInt(u6, &args);
+            }
+
+            if (contains(arg, &[_][]const u8{"--budget"})) {
+                result.budget_s = try parseInt(u64, &args);
+            }
+
+            if (contains(arg, &[_][]const u8{ "-h", "help", "-help", "--help" })) {
+                result.help = true;
             }
         }
 
@@ -82,6 +96,22 @@ const Arguments = struct {
             return ParseError.ExpectedArgument;
         }
     }
+
+    pub fn printHelp(writer: *std.Io.Writer) !void {
+        try writer.print(
+            \\run the benchmarks
+            \\
+            \\options:
+            \\  -h, --help    show this message and exit
+            \\  -p, --party   run benchmark for party: prover, verifier  (default: prover)
+            \\      --budget  maximum time of one run in seconds  (default: 2)
+            \\  -s, --style   output style: default, csv  (default: default)
+            \\      --from    min degree log  (default: 16)
+            \\      --to      max degree log  (default: 26)
+            \\
+        , .{});
+        try writer.flush();
+    }
 };
 
 pub fn main() !void {
@@ -89,14 +119,18 @@ pub fn main() !void {
     defer std.debug.assert(da.deinit() == .ok);
     const allocator = da.allocator();
 
-    const args = try Arguments.parse(allocator);
-
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
     const stdout = &stdout_writer.interface;
 
+    const args = try Arguments.parse(allocator);
+    if (args.help) {
+        try Arguments.printHelp(stdout);
+        std.process.exit(0);
+    }
+
     var bench = zbench.Benchmark.init(allocator, .{
-        .time_budget_ns = 2 * std.time.ns_per_s,
+        .time_budget_ns = args.budget_s * std.time.ns_per_s,
         .output_style = args.output_style,
     });
     defer bench.deinit();
