@@ -166,22 +166,22 @@ pub fn prove(
     f0_bitrev: []const T,
 ) !Proof {
     const n0 = cfg.n();
-    const n_fin = cfg.finalN();
-    const R = cfg.rounds();
+    const n_final = cfg.finalN();
+    const rounds_count = cfg.rounds();
 
     std.debug.assert(f0_bitrev.len == n0);
     std.debug.assert(utils.isPowerOfTwo(n0));
-    std.debug.assert(utils.isPowerOfTwo(n_fin));
-    std.debug.assert(1 <= n_fin and n_fin <= n0);
+    std.debug.assert(utils.isPowerOfTwo(n_final));
+    std.debug.assert(1 <= n_final and n_final <= n0);
 
     var ch = challenger_mod.Challenger.init();
 
     // Store layer values and Merkle trees for openings.
     // layers_vals[i] length = n0 >> i, for i=0..R (Rth is final evals).
-    var layers_vals = try allocator.alloc([]T, R + 1);
+    var layers_vals = try allocator.alloc([]T, rounds_count + 1);
     defer allocator.free(layers_vals);
 
-    var layers_trees = try allocator.alloc(merkle.MerkleTree, R);
+    var layers_trees = try allocator.alloc(merkle.MerkleTree, rounds_count);
     defer allocator.free(layers_trees);
 
     // Copy f0.
@@ -189,15 +189,15 @@ pub fn prove(
     @memcpy(layers_vals[0], f0_bitrev);
 
     // Roots to include in proof.
-    var roots = try allocator.alloc(merkle.Digest, R);
+    var roots = try allocator.alloc(merkle.Digest, rounds_count);
 
     // Betas (not included, derived by transcript).
-    var betas = try allocator.alloc(T, R);
+    var betas = try allocator.alloc(T, rounds_count);
     defer allocator.free(betas);
 
     // Build commitments and fold forward.
     var i: usize = 0;
-    while (i < R) : (i += 1) {
+    while (i < rounds_count) : (i += 1) {
         const n_i = n0 >> @intCast(i);
         const m_i = n_i / 2; // pair leaves
 
@@ -227,30 +227,30 @@ pub fn prove(
     }
 
     // Final evals are layers_vals[R], length = n_fin.
-    std.debug.assert(layers_vals[R].len == n_fin);
+    std.debug.assert(layers_vals[rounds_count].len == n_final);
 
     // Observe final evals in transcript before sampling queries.
-    for (layers_vals[R]) |z| {
+    for (layers_vals[rounds_count]) |z| {
         const b = z.encode(.little);
         ch.observeBytes(&b);
     }
 
     // Allocate proof containers (flat).
-    const Q = cfg.num_queries;
-    var queries = try allocator.alloc(QueryProof, Q);
+    const queries_count = cfg.num_queries;
+    var queries = try allocator.alloc(QueryProof, queries_count);
 
     // Total number of openings = Q * R.
-    const total_openings = Q * R;
-    var openings_flat = try allocator.alloc(PairOpening, total_openings);
+    const openings_count = queries_count * rounds_count;
+    var openings_flat = try allocator.alloc(PairOpening, openings_count);
 
     // Total number of path digests = sum over layers (Q * depth_i).
     // depth_i = log2(m_i).
     var total_paths: usize = 0;
     i = 0;
-    while (i < R) : (i += 1) {
+    while (i < rounds_count) : (i += 1) {
         const n_i = n0 >> @intCast(i);
         const m_i = n_i / 2;
-        total_paths += Q * utils.log2(m_i);
+        total_paths += queries_count * utils.log2(m_i);
     }
     var paths_flat = try allocator.alloc(merkle.Digest, total_paths);
 
@@ -259,18 +259,18 @@ pub fn prove(
     var paths_cursor: usize = 0;
 
     var q: usize = 0;
-    while (q < Q) : (q += 1) {
+    while (q < queries_count) : (q += 1) {
         // Query index derived from transcript.
         var idx: usize = ch.sampleIndexPow2(n0);
 
         // Set slice for this query’s openings.
-        const q_openings = openings_flat[openings_cursor .. openings_cursor + R];
-        openings_cursor += R;
+        const q_openings = openings_flat[openings_cursor .. openings_cursor + rounds_count];
+        openings_cursor += rounds_count;
         queries[q] = .{ .openings = q_openings };
 
         // For each layer, open the pair-leaf at (idx >> 1).
         i = 0;
-        while (i < R) : (i += 1) {
+        while (i < rounds_count) : (i += 1) {
             const n_i = n0 >> @intCast(i);
             const m_i = n_i / 2;
             const depth_i = utils.log2(m_i);
@@ -296,16 +296,16 @@ pub fn prove(
     }
 
     // Copy final evals into proof-owned buffer.
-    const final_evals = try allocator.alloc(T, n_fin);
-    @memcpy(final_evals, layers_vals[R]);
+    const final_evals = try allocator.alloc(T, n_final);
+    @memcpy(final_evals, layers_vals[rounds_count]);
 
     // Cleanup layer values + trees (proof already contains what it needs).
     i = 0;
-    while (i < R) : (i += 1) {
+    while (i < rounds_count) : (i += 1) {
         layers_trees[i].deinit(allocator);
         allocator.free(layers_vals[i]);
     }
-    allocator.free(layers_vals[R]);
+    allocator.free(layers_vals[rounds_count]);
 
     return .{
         .roots = roots,
