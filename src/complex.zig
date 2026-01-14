@@ -107,6 +107,7 @@ pub fn Complex(comptime InnerTypeIn: type) type {
             return self.mul(other.con()).scale(1.0 / den);
         }
 
+        /// Conjugate.
         pub inline fn con(self: Self) Self {
             return Self{ .re = self.re, .im = -self.im };
         }
