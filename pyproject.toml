@@ -1,0 +1,21 @@
+[project]
+name = "afri"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.10.8",
+    "python-dotenv>=1.2.1",
+    "scienceplots>=2.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.11",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.25,<0.10.0"]
+build-backend = "uv_build"
+
+[project.scripts]
+afri = "afri.cli.main:main"
