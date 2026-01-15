@@ -45,6 +45,20 @@ pub fn Complex(comptime InnerTypeIn: type) type {
             return out;
         }
 
+        pub fn random(rng: std.Random) Self {
+            if (comptime @sizeOf(InnerType) == 4) {
+                const re = (@as(InnerType, @floatFromInt(rng.int(u32))) / 4294967296.0) - 0.5;
+                const im = (@as(InnerType, @floatFromInt(rng.int(u32))) / 4294967296.0) - 0.5;
+                return .{ .re = re, .im = im };
+            } else if (comptime @sizeOf(InnerType) == 8) {
+                const re = (@as(InnerType, @floatFromInt(rng.int(u64))) / 4294967296.0) - 0.5;
+                const im = (@as(InnerType, @floatFromInt(rng.int(u64))) / 4294967296.0) - 0.5;
+                return .{ .re = re, .im = im };
+            } else {
+                @compileError("unsupported size");
+            }
+        }
+
         pub inline fn cis(theta: InnerType) Self {
             return Self{
                 .re = std.math.cos(theta),

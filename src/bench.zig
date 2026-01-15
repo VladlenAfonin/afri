@@ -204,14 +204,7 @@ const AfriBenchmark = struct {
 
         // Begin with coefficients. Free in deinit().
         const f0 = try allocator.alloc(T, n0);
-
-        for (f0[0..@divExact(n0, 2)]) |*c| {
-            // Small coefficients in [-0.5, 0.5].
-            const re = (@as(T.InnerType, @floatFromInt(rng.int(u32))) / 4294967296.0) - 0.5;
-            const im = (@as(T.InnerType, @floatFromInt(rng.int(u32))) / 4294967296.0) - 0.5;
-            c.* = .{ .re = re, .im = im };
-        }
-
+        for (f0[0..@divExact(n0, 2)]) |*c| c.* = T.random(rng);
         for (f0[@divExact(n0, 2)..n0]) |*c| c.* = T.zero;
 
         utils.bitReversePermute(T, f0);
