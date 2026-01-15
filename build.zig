@@ -40,4 +40,22 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("bench", "Run the benchmarks");
     run_step.dependOn(&run.step);
+
+    const fri_bench = b.addExecutable(.{
+        .name = "fri_bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/fri/bench.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    fri_bench.root_module.addImport("zbench", zbench);
+
+    const fri_run = b.addRunArtifact(fri_bench);
+    if (b.args) |args| {
+        fri_run.addArgs(args);
+    }
+
+    const fri_run_step = b.step("bench-fri", "Run the FRI benchmarks");
+    fri_run_step.dependOn(&fri_run.step);
 }
