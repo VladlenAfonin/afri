@@ -45,18 +45,11 @@ pub fn Complex(comptime InnerTypeIn: type) type {
             return out;
         }
 
+        /// Generate number with parts in \[-0.5, 0.5\].
         pub fn random(rng: std.Random) Self {
-            if (comptime @sizeOf(InnerType) == 4) {
-                const re = (@as(InnerType, @floatFromInt(rng.int(u32))) / 4294967296.0) - 0.5;
-                const im = (@as(InnerType, @floatFromInt(rng.int(u32))) / 4294967296.0) - 0.5;
-                return .{ .re = re, .im = im };
-            } else if (comptime @sizeOf(InnerType) == 8) {
-                const re = (@as(InnerType, @floatFromInt(rng.int(u64))) / 4294967296.0) - 0.5;
-                const im = (@as(InnerType, @floatFromInt(rng.int(u64))) / 4294967296.0) - 0.5;
-                return .{ .re = re, .im = im };
-            } else {
-                @compileError("unsupported size");
-            }
+            const re = rng.float(InnerType) - 0.5;
+            const im = rng.float(InnerType) - 0.5;
+            return .{ .re = re, .im = im };
         }
 
         pub inline fn cis(theta: InnerType) Self {
