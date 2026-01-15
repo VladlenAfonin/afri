@@ -24,6 +24,20 @@ def parse_args(parser: argparse.ArgumentParser) -> None:
     )
 
     parser.add_argument(
+        "--fri",
+        help="FRI data",
+        required=True,
+        dest="fri_input_file",
+    )
+
+    parser.add_argument(
+        "--afri",
+        help="aFRI data",
+        required=True,
+        dest="afri_input_file",
+    )
+
+    parser.add_argument(
         "-o",
         "--out",
         "--output",
@@ -41,20 +55,7 @@ def parse_args(parser: argparse.ArgumentParser) -> None:
         dest="force",
     )
 
-    parser.add_argument(
-        "-i",
-        "--in",
-        "--input",
-        help="input file with data",
-        required=True,
-        dest="input_file",
-    )
-
     parser.set_defaults(func=act)
-
-
-def load_data(): ...
-def plot(): ...
 
 
 @logging_mark(logger)
@@ -66,7 +67,14 @@ def act(args: argparse.Namespace) -> int:
         )
         return 1
 
-    if not os.path.isfile(args.input_file):
+    if not os.path.isfile(args.fri_input_file):
+        logger.error(
+            "input file not found: %s",
+            args.input_file,
+        )
+        return 1
+
+    if not os.path.isfile(args.afri_input_file):
         logger.error(
             "input file not found: %s",
             args.input_file,
@@ -74,35 +82,54 @@ def act(args: argparse.Namespace) -> int:
         return 1
 
     logger.debug("got output_file = %s", args.output_file)
-    logger.debug("got input_file = %s", args.input_file)
+    logger.debug("got fri_input_file = %s", args.fri_input_file)
+    logger.debug("got afri_input_file = %s", args.afri_input_file)
 
     log_ns = []
-    avgs = []
-    with open(args.input_file, "r") as input_file:
+    fri_avgs = []
+    afri_avgs = []
+
+    with open(args.fri_input_file, "r") as input_file:
         input_reader = csv.DictReader(input_file)
         for row in input_reader:
             log_ns.append(int(row["benchmark"]))
-            avgs.append(int(row["avg"]) // (1e6 if args.party == "prover" else 1))
+            fri_avgs.append(int(row["avg"]) / (1e6 if args.party == "prover" else 1e6))
+
+    with open(args.afri_input_file, "r") as input_file:
+        input_reader = csv.DictReader(input_file)
+        for row in input_reader:
+            afri_avgs.append(int(row["avg"]) / (1e6 if args.party == "prover" else 1e6))
 
     plt.style.use(["science", "russian-font"])
 
     _, ax = plt.subplots()
 
     # INFO: X-scale is already log.
-    ax.set_yscale("log")
+    if args.party == "prover":
+        ax.set_yscale("log")
+
     ax.set_xlabel("Степень начального многочлена")
     ax.set_ylabel(
-        "Время выполнения, мс" if args.party == "prover" else "Время выполнения, нс"
+        "Время выполнения, мс" if args.party == "prover" else "Время выполнения, мс"
     )
 
     ax.plot(
         log_ns,
-        avgs,
-        label="Доказывающий" if args.party == "prover" else "Проверяющий",
+        fri_avgs,
+        label=r"Доказывающий FRI" if args.party == "prover" else "Проверяющий FRI",
     )
 
+    ax.plot(
+        log_ns,
+        afri_avgs,
+        # label=r"$\mathcal{P}_{\textsf{aFRI}}$"
+        label=r"Доказывающий aFRI" if args.party == "prover" else "Проверяющий aFRI",
+    )
+
+    xticks = ax.get_xticks()
+    ax.set_xticklabels([f"$2^{{{x:.0f}}}$" for x in xticks])
+
     # ax.set_xticks([2**x for x in avgs])
-    # ax.set_xticklabels([f"$2^{{{x:.0f}}}$" for x in avgs])
     # ax.plot([2**x for x in initial_degree_logs], prover_times, label="Доказывающий")
     # ax.plot([2**x for x in initial_degree_logs], verifier_times, label="Проверяющий")
     ax.legend()
