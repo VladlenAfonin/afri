@@ -23,23 +23,23 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }).module("zbench");
 
-    const bench = b.addExecutable(.{
-        .name = "bench",
+    const afri_bench = b.addExecutable(.{
+        .name = "afri_bench",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/bench.zig"),
+            .root_source_file = b.path("src/afri/bench.zig"),
             .target = target,
             .optimize = optimize,
         }),
     });
-    bench.root_module.addImport("zbench", zbench);
+    afri_bench.root_module.addImport("zbench", zbench);
 
-    const run = b.addRunArtifact(bench);
+    const afri_run = b.addRunArtifact(afri_bench);
     if (b.args) |args| {
-        run.addArgs(args);
+        afri_run.addArgs(args);
     }
 
-    const run_step = b.step("bench", "Run the benchmarks");
-    run_step.dependOn(&run.step);
+    const afri_run_step = b.step("bench-afri", "Run the benchmarks");
+    afri_run_step.dependOn(&afri_run.step);
 
     const fri_bench = b.addExecutable(.{
         .name = "fri_bench",

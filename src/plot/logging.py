@@ -1,6 +1,6 @@
 import timeit
 
-from afri.config import config
+from plot.config import config
 
 
 default_config = {
@@ -17,7 +17,7 @@ default_config = {
         },
     },
     "loggers": {
-        "afri": {
+        "plot": {
             "level": f"{config.get('LOGLEVEL', 'INFO').upper()}",
             "handlers": ["stdout"],
         },

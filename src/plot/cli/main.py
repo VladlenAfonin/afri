@@ -3,8 +3,8 @@ import logging
 import logging.config
 import sys
 
-import afri.cli.run
-import afri.logging
+import plot.cli.run
+import plot.logging
 
 
 logger = logging.getLogger(__name__)
@@ -17,13 +17,13 @@ def parse_args() -> argparse.Namespace:
     sub_parsers = parser.add_subparsers()
 
     run_parser = sub_parsers.add_parser("run", help="run application")
-    afri.cli.run.parse_args(run_parser)
+    plot.cli.run.parse_args(run_parser)
 
     return parser.parse_args()
 
 
 def main() -> int:
-    logging.config.dictConfig(afri.logging.default_config)
+    logging.config.dictConfig(plot.logging.default_config)
     logger.debug("begin application")
 
     args = parse_args()

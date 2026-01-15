@@ -6,8 +6,8 @@ import csv
 from matplotlib import pyplot as plt
 import scienceplots
 
-from afri.config import config
-from afri.logging import logging_mark
+from plot.config import config
+from plot.logging import logging_mark
 
 
 logger = logging.getLogger(__name__)
