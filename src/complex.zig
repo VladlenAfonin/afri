@@ -144,6 +144,25 @@ pub fn Complex(comptime InnerTypeIn: type) type {
 }
 
 /// Build roots w^k in bit-reversed order.
+pub fn makeRootsAlloc(
+    comptime C: type,
+    allocator: std.mem.Allocator,
+    n: usize,
+) ![]C {
+    std.debug.assert(utils.isPowerOfTwo(n));
+    var xs = try allocator.alloc(C, n);
+
+    const omega = C.root(n);
+    xs[0] = C.one;
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        xs[i] = xs[i - 1].mul(omega);
+    }
+
+    return xs;
+}
+
+/// Build roots w^k in bit-reversed order.
 pub fn makeRootsBitrevAlloc(
     comptime C: type,
     allocator: std.mem.Allocator,

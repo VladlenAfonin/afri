@@ -1,6 +1,7 @@
 const std = @import("std");
 const zbench = @import("zbench");
 const afri = @import("afri.zig");
+const utils = @import("utils.zig");
 const complex = @import("complex.zig");
 
 fn contains(target: []const u8, xs: []const []const u8) bool {
@@ -155,7 +156,9 @@ pub fn main() !void {
             .num_queries = 16,
             .delta_fold = 5e-3,
             .delta_final = 5e-3,
-            .degree_bound = 8,
+
+            // TODO: Allow setting either blowup factor or initial degree log.
+            .degree_bound = @divExact(@as(usize, 1) << n, 2), // this sets rho = 1/2
         };
 
         b.* = try AfriBenchmark.init(args.party, allocator, rng, config);
@@ -199,24 +202,21 @@ const AfriBenchmark = struct {
     ) !Self {
         const n0 = config.n();
 
-        // Build domain points in bitrev order.
-        const xs = try complex.makeRootsBitrevAlloc(T, allocator, n0);
-        defer allocator.free(xs);
+        // Begin with coefficients. Free in deinit().
+        const f0 = try allocator.alloc(T, n0);
 
-        var coeffs: [8]T = undefined;
-        for (&coeffs) |*c| {
-            // small coefficients in [-0.5, 0.5].
+        for (f0[0..@divExact(n0, 2)]) |*c| {
+            // Small coefficients in [-0.5, 0.5].
             const re = (@as(T.InnerType, @floatFromInt(rng.int(u32))) / 4294967296.0) - 0.5;
             const im = (@as(T.InnerType, @floatFromInt(rng.int(u32))) / 4294967296.0) - 0.5;
             c.* = .{ .re = re, .im = im };
         }
 
-        // Evaluate on domain (bitrev order).
-        const f0 = try allocator.alloc(T, n0);
+        for (f0[@divExact(n0, 2)..n0]) |*c| c.* = T.zero;
 
-        for (f0, xs) |*out, x| {
-            out.* = complex.evalPoly(T, &coeffs, x);
-        }
+        utils.bitReversePermute(T, f0);
+        afri.fftBitrevInPlace(f0, false);
+        utils.bitReversePermute(T, f0);
 
         const proof = try afri.prove(allocator, config, f0);
 
@@ -245,9 +245,9 @@ const AfriBenchmark = struct {
     }
 
     inline fn run_verifier(self: *Self, allocator: std.mem.Allocator) void {
-        std.mem.doNotOptimizeAway(
-            afri.verify(allocator, self.config, self.proof),
-        );
+        const result = afri.verify(allocator, self.config, self.proof);
+        std.mem.doNotOptimizeAway(result);
+        std.debug.assert(result);
     }
 
     pub fn deinit(self: Self) void {

@@ -71,7 +71,7 @@ fn foldLayerInPlace(
 /// In-place radix-2 DIT FFT.
 /// Assumes input is in bit-reversed order; output is in natural order.
 /// If inverse=true, computes inverse FFT and divides by n.
-fn fftBitrevInPlace(xs: []T, inverse: bool) void {
+pub fn fftBitrevInPlace(xs: []T, inverse: bool) void {
     const n = xs.len;
     std.debug.assert(utils.isPowerOfTwo(n));
     if (n == 1) return;
@@ -323,20 +323,20 @@ pub fn verify(
 ) bool {
     const n0 = cfg.n();
     const n_fin = cfg.finalN();
-    const R = cfg.rounds();
+    const n_rounds = cfg.rounds();
 
-    if (proof.roots.len != R) return false;
+    if (proof.roots.len != n_rounds) return false;
     if (proof.final_evals.len != n_fin) return false;
     if (proof.queries.len != cfg.num_queries) return false;
 
     var ch = challenger_mod.Challenger.init();
 
     // Recompute betas from roots.
-    var betas = allocator.alloc(T, R) catch return false;
+    var betas = allocator.alloc(T, n_rounds) catch return false;
     defer allocator.free(betas);
 
     var i: usize = 0;
-    while (i < R) : (i += 1) {
+    while (i < n_rounds) : (i += 1) {
         ch.observeDigest(proof.roots[i]);
         const angle = ch.sampleAngleF32();
         betas[i] = T.cis(angle);
@@ -355,7 +355,7 @@ pub fn verify(
 
         // For fold checks, we need to compare expected next value to actual next layer value.
         i = 0;
-        while (i < R) : (i += 1) {
+        while (i < n_rounds) : (i += 1) {
             const n_i = n0 >> @intCast(i);
             const m_i = n_i / 2;
             const depth_i = utils.log2(m_i);
@@ -383,7 +383,7 @@ pub fn verify(
             const next_idx = pair_idx;
 
             // Actual next layer value.
-            const actual_next = if (i + 1 < R) blk: {
+            const actual_next = if (i + 1 < n_rounds) blk: {
                 const opening_next = proof.queries[q].openings[i + 1];
                 const next_is_even = (next_idx & 1) == 0;
                 break :blk if (next_is_even) opening_next.even else opening_next.odd;
@@ -413,7 +413,7 @@ pub fn verify(
     fftBitrevInPlace(coeffs, true);
 
     // Degree bound after R folds: floor(degree_bound / 2^R).
-    const deg_fin = @min(cfg.degree_bound >> @intCast(R), n_fin);
+    const deg_fin = @min(cfg.degree_bound >> @intCast(n_rounds), n_fin);
     var k: usize = deg_fin;
     while (k < n_fin) : (k += 1) {
         if (!coeffs[k].is_zero(cfg.delta_final)) return false;
