@@ -2,8 +2,8 @@
 
 set -eu
 
-ROOT_DIR="$(dirname "$(readlink -f "$0")")"
-BUILD_DIR="${ROOT_DIR}/build"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+BUILD_DIR="${SCRIPT_DIR}/build"
 PARTY=""
 
 if [[ "$#" -ne 1 ]]; then
@@ -27,7 +27,7 @@ LATEXMK=(
     "--lualatex"
     "--outdir=${BUILD_DIR}"
     "--auxdir=${BUILD_DIR}"
-    "${ROOT_DIR}/${PARTY}.tex"
+    "${SCRIPT_DIR}/${PARTY}.tex"
 )
 "${LATEXMK[@]}"
 
