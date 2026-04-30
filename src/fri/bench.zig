@@ -31,12 +31,8 @@ const Arguments = struct {
         InvalidArgument,
     };
 
-    pub fn parse(allocator: std.mem.Allocator) ParseError!Self {
-        var args = std.process.argsWithAllocator(allocator) catch |e| {
-            std.debug.panic("unable to allocate memory: {}\n", .{e});
-            return ParseError.AllocatorError;
-        };
-        defer args.deinit();
+    pub fn parse(args_raw: std.process.Args) ParseError!Self {
+        var args = args_raw.iterate();
         _ = args.next();
 
         var result: Arguments = .{};
@@ -72,7 +68,7 @@ const Arguments = struct {
         return result;
     }
 
-    fn parseEnum(comptime T: type, args: *std.process.ArgIterator) ParseError!T {
+    fn parseEnum(comptime T: type, args: *std.process.Args.Iterator) ParseError!T {
         const info = @typeInfo(T);
         if (args.next()) |arg| {
             inline for (info.@"enum".fields) |field| {
@@ -87,7 +83,7 @@ const Arguments = struct {
         return ParseError.InvalidArgument;
     }
 
-    fn parseInt(comptime T: type, args: *std.process.ArgIterator) ParseError!T {
+    fn parseInt(comptime T: type, args: *std.process.Args.Iterator) ParseError!T {
         if (args.next()) |x| {
             const value = std.fmt.parseInt(T, x, 10) catch {
                 return ParseError.InvalidArgument;
@@ -116,22 +112,18 @@ const Arguments = struct {
     }
 };
 
-pub fn main() !void {
-    var da: std.heap.DebugAllocator(.{}) = .init;
-    defer std.debug.assert(da.deinit() == .ok);
-    const allocator = da.allocator();
-
+pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
 
-    const args = try Arguments.parse(allocator);
+    const args = try Arguments.parse(init.minimal.args);
     if (args.help) {
         try Arguments.printHelp(stdout);
         std.process.exit(0);
     }
 
-    var bench = zbench.Benchmark.init(allocator, .{
+    var bench = zbench.Benchmark.init(init.gpa, .{
         .time_budget_ns = args.budget_s * std.time.ns_per_s,
         .output_style = args.output_style,
     });
@@ -141,15 +133,15 @@ pub fn main() !void {
     const rng = prng.random();
 
     @setEvalBranchQuota(5000);
-    const ns = try allocator.alloc(u6, args.log_n_to - args.log_n_from + 1);
-    defer allocator.free(ns);
+    const ns = try init.gpa.alloc(u6, args.log_n_to - args.log_n_from + 1);
+    defer init.gpa.free(ns);
     for (ns, 0..) |*n, i| {
         n.* = args.log_n_from + @as(u6, @intCast(i));
     }
 
     var buffer: [1024]u8 = undefined;
-    const benchmarks = try allocator.alloc(FriBenchmark, ns.len);
-    defer allocator.free(benchmarks);
+    const benchmarks = try init.gpa.alloc(FriBenchmark, ns.len);
+    defer init.gpa.free(benchmarks);
     for (benchmarks, ns, 0..) |*b, n, i| {
         const config = fri.FriConfig{
             .log_blowup = 2,
@@ -158,7 +150,7 @@ pub fn main() !void {
             .proof_of_work_bits = 0,
         };
 
-        b.* = try FriBenchmark.init(args.party, allocator, rng, config, n);
+        b.* = try FriBenchmark.init(args.party, init.gpa, rng, config, n);
         try bench.addParam(
             try std.fmt.bufPrint(
                 buffer[i * 8 .. (i + 1) * 8],
