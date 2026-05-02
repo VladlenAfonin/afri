@@ -422,135 +422,106 @@ pub fn verify(
     return true;
 }
 
-test "aFRI accepts low-degree polynomial (small params)" {
-    const allocator = std.testing.allocator;
+fn generateComplexArrayTest(rng: std.Random, xs: []T) void {
+    for (xs) |*x| {
+        const re = rng.float(f32) - 0.5;
+        const im = rng.float(f32) - 0.5;
+        x.* = .{ .re = re, .im = im };
+    }
+}
 
-    const cfg: Config = .{
+const test_prng_seed = 0x1234_5678_9abc_def0;
+
+fn smallParamsTestConfig(delta_final: T.InnerType) Config {
+    return .{
         .log_n = 6, // n = 64
         .log_final_n = 3, // n_fin = 8, R = 3
         .num_queries = 16,
         .delta_fold = 5e-3,
-        .delta_final = 5e-3,
+        .delta_final = delta_final,
         .degree_bound = 8, // deg < 8 initially
     };
+}
 
+fn makeLowDegreeEvalsTest(
+    allocator: std.mem.Allocator,
+    rng: std.Random,
+    cfg: Config,
+) ![]T {
     const n0 = cfg.n();
 
     // Build domain points in bitrev order.
     const xs = try complex.makeRootsBitrevAlloc(T, allocator, n0);
-    defer std.testing.allocator.free(xs);
+    defer allocator.free(xs);
 
-    // Random polynomial coefficients (deterministic seed)
-    var prng = std.Random.DefaultPrng.init(0x1234_5678_9abc_def0);
-    const rnd = prng.random();
+    const coeffs = try allocator.alloc(T, cfg.degree_bound);
+    defer allocator.free(coeffs);
+    generateComplexArrayTest(rng, coeffs);
 
-    var coeffs: [8]T = undefined;
-    for (&coeffs) |*c| {
-        // small coefficients in [-0.5, 0.5]
-        const re = (@as(T.InnerType, @floatFromInt(rnd.int(u32))) / 4294967296.0) - 0.5;
-        const im = (@as(T.InnerType, @floatFromInt(rnd.int(u32))) / 4294967296.0) - 0.5;
-        c.* = .{ .re = re, .im = im };
-    }
-
-    // Evaluate on domain (bitrev order)
-    const f0 = try std.testing.allocator.alloc(T, n0);
-    defer std.testing.allocator.free(f0);
+    // Evaluate on domain (bitrev order).
+    const f0 = try allocator.alloc(T, n0);
+    errdefer allocator.free(f0);
 
     for (f0, xs) |*out, x| {
-        out.* = complex.evalPoly(T, &coeffs, x);
+        out.* = complex.evalPoly(T, coeffs, x);
     }
 
-    var proof = try prove(std.testing.allocator, cfg, f0);
-    defer proof.deinit(std.testing.allocator);
+    return f0;
+}
+
+fn makeLowDegreeProofTest(allocator: std.mem.Allocator, cfg: Config) !Proof {
+    var prng = std.Random.DefaultPrng.init(test_prng_seed);
+    const rng = prng.random();
+
+    const f0 = try makeLowDegreeEvalsTest(allocator, rng, cfg);
+    defer allocator.free(f0);
+
+    return try prove(allocator, cfg, f0);
+}
+
+test "aFRI accepts low-degree polynomial (small params)" {
+    const allocator = std.testing.allocator;
+    const cfg = smallParamsTestConfig(5e-3);
+
+    var proof = try makeLowDegreeProofTest(allocator, cfg);
+    defer proof.deinit(allocator);
 
     try std.testing.expect(verify(allocator, cfg, proof));
 }
 
 test "aFRI rejects if a query opening is tampered (Merkle mismatch or fold mismatch)" {
-    const cfg: Config = .{
-        .log_n = 6, // n=64
-        .log_final_n = 3, // n_fin=8, R=3
-        .num_queries = 16,
-        .delta_fold = 5e-3,
-        .delta_final = 5e-3,
-        .degree_bound = 8,
-    };
+    const allocator = std.testing.allocator;
+    const cfg = smallParamsTestConfig(5e-3);
 
-    const n0 = cfg.n();
-
-    // Domain points in bitrev order.
-    const xs = try complex.makeRootsBitrevAlloc(T, std.testing.allocator, n0);
-    defer std.testing.allocator.free(xs);
-
-    // Deterministic polynomial
-    var prng = std.Random.DefaultPrng.init(0x1234_5678_9abc_def0);
-    const rnd = prng.random();
-
-    var coeffs: [8]T = undefined;
-    for (&coeffs) |*c| {
-        const re = (@as(T.InnerType, @floatFromInt(rnd.int(u32))) / 4294967296.0) - 0.5;
-        const im = (@as(T.InnerType, @floatFromInt(rnd.int(u32))) / 4294967296.0) - 0.5;
-        c.* = .{ .re = re, .im = im };
-    }
-
-    const f0 = try std.testing.allocator.alloc(T, n0);
-    defer std.testing.allocator.free(f0);
-    for (f0, xs) |*out, x| out.* = complex.evalPoly(T, &coeffs, x);
-
-    var proof = try prove(std.testing.allocator, cfg, f0);
-    defer proof.deinit(std.testing.allocator);
+    var proof = try makeLowDegreeProofTest(allocator, cfg);
+    defer proof.deinit(allocator);
 
     // Sanity: valid proof should verify.
-    try std.testing.expect(verify(std.testing.allocator, cfg, proof));
+    try std.testing.expect(verify(allocator, cfg, proof));
 
     // Tamper with a single opened value in the very first query, first layer.
     // This should (almost surely) invalidate the Merkle proof for that layer.
     proof.queries[0].openings[0].even.re += 0.1234;
 
-    try std.testing.expect(!verify(std.testing.allocator, cfg, proof));
+    try std.testing.expect(!verify(allocator, cfg, proof));
 }
 
 test "aFRI rejects if final layer is tampered (final degree check fails)" {
-    // Use a tighter delta_final so that changing a final
-    // evaluation breaks the coefficient bound robustly.
-    const cfg: Config = .{
-        .log_n = 6, // n = 64
-        .log_final_n = 3, // n_fin = 8
-        .num_queries = 16,
-        .delta_fold = 5e-3,
-        .delta_final = 1e-4, // tighter final tolerance
-        .degree_bound = 8,
-    };
+    const allocator = std.testing.allocator;
+    // Use a tighter delta_final so that changing a final evaluation breaks the
+    // coefficient bound robustly.
+    const cfg = smallParamsTestConfig(1e-4);
 
-    const n0 = cfg.n();
+    var proof = try makeLowDegreeProofTest(allocator, cfg);
+    defer proof.deinit(allocator);
 
-    const xs = try complex.makeRootsBitrevAlloc(T, std.testing.allocator, n0);
-    defer std.testing.allocator.free(xs);
-
-    var prng = std.Random.DefaultPrng.init(0x1234_5678_9abc_def0);
-    const rnd = prng.random();
-
-    var coeffs: [8]T = undefined;
-    for (&coeffs) |*c| {
-        const re = (@as(T.InnerType, @floatFromInt(rnd.int(u32))) / 4294967296.0) - 0.5;
-        const im = (@as(T.InnerType, @floatFromInt(rnd.int(u32))) / 4294967296.0) - 0.5;
-        c.* = .{ .re = re, .im = im };
-    }
-
-    const f0 = try std.testing.allocator.alloc(T, n0);
-    defer std.testing.allocator.free(f0);
-    for (f0, xs) |*out, x| out.* = complex.evalPoly(T, &coeffs, x);
-
-    var proof = try prove(std.testing.allocator, cfg, f0);
-    defer proof.deinit(std.testing.allocator);
-
-    // Sanity: valid proof should verify
-    try std.testing.expect(verify(std.testing.allocator, cfg, proof));
+    // Sanity: valid proof should verify.
+    try std.testing.expect(verify(allocator, cfg, proof));
 
     // Tamper with one final evaluation entry.
     // Since verifier uses final_evals for the terminal IFFT/degree bound check,
     // this should cause coefficients above the bound to become non-negligible.
     proof.final_evals[0].re += 0.25;
 
-    try std.testing.expect(!verify(std.testing.allocator, cfg, proof));
+    try std.testing.expect(!verify(allocator, cfg, proof));
 }
