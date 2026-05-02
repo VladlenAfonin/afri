@@ -114,7 +114,8 @@ const Arguments = struct {
 
 pub fn main(init: std.process.Init) !void {
     var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    var stdout_file = std.Io.File.stdout();
+    var stdout_writer = stdout_file.writer(init.io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
 
     const args = try Arguments.parse(init.minimal.args);
@@ -162,7 +163,7 @@ pub fn main(init: std.process.Init) !void {
         );
     }
 
-    try bench.run(stdout);
+    try bench.run(init.io, stdout_file);
     try stdout.flush();
 
     for (benchmarks) |b| b.deinit();
