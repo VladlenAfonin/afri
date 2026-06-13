@@ -74,6 +74,13 @@ pub fn foldBinary(
 ///
 /// This matches Plonky3's `fold_even_odd` math.
 pub fn foldEvenOddBitrev(out: []F, values: []const F, beta: F) void {
+    foldEvenOddBitrevShift(out, values, beta, F.one);
+}
+
+/// Fold evaluations over the coset `shift * <omega>`.
+/// Input and output are bit-reversed; the next layer lives on
+/// `shift^2 * <omega^2>`.
+pub fn foldEvenOddBitrevShift(out: []F, values: []const F, beta: F, shift: F) void {
     const n = values.len;
     std.debug.assert(utils.isPowerOfTwo(n));
     std.debug.assert(n >= 2);
@@ -84,8 +91,9 @@ pub fn foldEvenOddBitrev(out: []F, values: []const F, beta: F) void {
 
     // Here we construct the array of omega powers sorted in bitreverse.
     const omega_inv = F.twoAdicGenerator(log_n).inv();
+    const shift_inv = shift.inv();
     const one_half = F.inv2;
-    const half_beta = beta.halve();
+    const half_beta = beta.halve().mul(shift_inv);
 
     // We need power[i] = (beta/2) * omega_inv^{bitrev(i)} for i in [0..height).
     // Compute sequential powers then bit-reverse the array.
@@ -120,6 +128,11 @@ pub fn foldEvenOddBitrev(out: []F, values: []const F, beta: F) void {
 /// Verifier-side: compute a single folded value for a specific row.
 /// `row` is the index in the next layer (bit-reversed, size = n/2).
 pub fn foldRowBitrev(n: usize, row: usize, lo: F, hi: F, beta: F) F {
+    return foldRowBitrevShift(n, row, lo, hi, beta, F.one);
+}
+
+/// Verifier-side coset-aware fold for a single row.
+pub fn foldRowBitrevShift(n: usize, row: usize, lo: F, hi: F, beta: F, shift: F) F {
     std.debug.assert(utils.isPowerOfTwo(n));
     std.debug.assert(n >= 2);
 
@@ -128,7 +141,7 @@ pub fn foldRowBitrev(n: usize, row: usize, lo: F, hi: F, beta: F) F {
 
     const omega_inv = F.twoAdicGenerator(log_n).inv();
     const one_half = F.one.halve();
-    const half_beta = beta.mul(one_half);
+    const half_beta = beta.mul(one_half).mul(shift.inv());
 
     const e = utils.bitReverse(row, log_h);
     const omega_inv_pow = F.pow(omega_inv, @intCast(e));
@@ -145,6 +158,7 @@ pub const FriConfig = struct {
     log_final_poly_len: usize, // final codeword length = 1<<log_final_poly_len
     num_queries: usize,
     proof_of_work_bits: u8,
+    domain_shift: F = F.one,
 };
 
 pub const CommitPhaseStep = struct {
@@ -192,12 +206,26 @@ fn evalPoly(coeffs: []const F, x: F) F {
 ///
 /// You give this function the bit-reversed index.
 fn getOmegaBitrev(log_n: usize, idx_bitrev: usize) F {
+    return getCosetPointBitrev(log_n, idx_bitrev, F.one);
+}
+
+/// Get the point in `shift * <omega>` at the `idx_bitrev` index.
+fn getCosetPointBitrev(log_n: usize, idx_bitrev: usize, shift: F) F {
     const n = @as(usize, 1) << @intCast(log_n);
     std.debug.assert(idx_bitrev < n);
 
     const omega = F.twoAdicGenerator(log_n);
     const e = utils.bitReverse(idx_bitrev, log_n);
-    return F.pow(omega, @intCast(e));
+    return shift.mul(F.pow(omega, @intCast(e)));
+}
+
+fn squareTimes(x: F, times: usize) F {
+    var result = x;
+    var i: usize = 0;
+    while (i < times) : (i += 1) {
+        result.mulAssign(result);
+    }
+    return result;
 }
 
 /// Run the FRI prover for the `evals0_bitrev` bit-reversed array of polynomial evaluations.
@@ -221,6 +249,7 @@ pub fn prove(
 
     const final_len = @as(usize, 1) << @intCast(config.log_final_poly_len);
     const num_layers = log_n0 - config.log_final_poly_len;
+    var layer_shift = config.domain_shift;
 
     // We will commit to layers of size n0, n0/2, ..., 2*final_len.
     // There are num_layers commits and num_layers betas.
@@ -269,7 +298,8 @@ pub fn prove(
 
         const next_len = layers[li].len / 2;
         const next = try allocator.alloc(F, next_len);
-        foldEvenOddBitrev(next, layers[li], betas[li]);
+        foldEvenOddBitrevShift(next, layers[li], betas[li], layer_shift);
+        layer_shift.mulAssign(layer_shift);
 
         layers[li + 1] = next;
     }
@@ -282,6 +312,17 @@ pub fn prove(
     // Convert from bit-reversed eval order to normal, then IFFT to coefficients.
     utils.bitReversePermutation(F, final_poly);
     fft.fftInPlace(final_poly, true);
+
+    // If the final layer is evaluated on a coset, IFFT gives coefficients of
+    // p(shift * X). Convert those back to coefficients of p(X).
+    const final_shift = squareTimes(config.domain_shift, num_layers);
+    var shift_pow = F.one;
+    const shift_inv = final_shift.inv();
+    var coeff_i: usize = 0;
+    while (coeff_i < final_poly.len) : (coeff_i += 1) {
+        final_poly[coeff_i].mulAssign(shift_pow);
+        shift_pow.mulAssign(shift_inv);
+    }
 
     // Observe final poly into transcript.
     for (final_poly) |c| challenger.observeField(c);
@@ -361,6 +402,7 @@ pub fn verify(
     const n0 = @as(usize, 1) << @intCast(log_n0);
     const final_len = @as(usize, 1) << @intCast(config.log_final_poly_len);
     const num_layers = log_n0 - config.log_final_poly_len;
+    const final_shift = squareTimes(config.domain_shift, num_layers);
 
     if (proof.roots.len != num_layers) return false;
     if (proof.final_poly.len != final_len) return false;
@@ -404,6 +446,7 @@ pub fn verify(
         // Verify Merkle openings and fold consistency down the chain.
         var folded_eval = q.value0;
         var index = q.idx0;
+        var layer_shift = config.domain_shift;
 
         li = 0;
         while (li < num_layers) : (li += 1) {
@@ -423,14 +466,15 @@ pub fn verify(
             if (!std.mem.eql(u8, &recomputed, &root)) return false;
 
             // Fold to next layer value at index = pair_idx.
-            folded_eval = foldRowBitrev(size, pair_idx, lo, hi, betas[li]);
+            folded_eval = foldRowBitrevShift(size, pair_idx, lo, hi, betas[li], layer_shift);
+            layer_shift.mulAssign(layer_shift);
             index = pair_idx;
         }
 
         // Final polynomial consistency.
         // index is in [0..final_len).
         if (index >= final_len) return false;
-        const x = getOmegaBitrev(config.log_final_poly_len, index);
+        const x = getCosetPointBitrev(config.log_final_poly_len, index, final_shift);
         const y = evalPoly(proof.final_poly, x);
         if (folded_eval.neq(y)) return false;
     }

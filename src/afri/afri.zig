@@ -24,6 +24,12 @@ fn leafDigestPairT(even: T, odd: T) merkle.Digest {
 /// For a pair-leaf row index `row` in [0..n/2),
 /// the corresponding x is w^{bitrev(row, log2(n)-1)}.
 fn domainPointForRowBitrev(n: usize, row: usize) T {
+    return domainPointForRowBitrevShift(n, row, T.one);
+}
+
+/// For a pair-leaf row index `row` in [0..n/2),
+/// the corresponding x is shift * w^{bitrev(row, log2(n)-1)}.
+fn domainPointForRowBitrevShift(n: usize, row: usize, shift: T) T {
     std.debug.assert(utils.isPowerOfTwo(n));
     std.debug.assert(n >= 2);
 
@@ -32,15 +38,21 @@ fn domainPointForRowBitrev(n: usize, row: usize) T {
     const e = utils.bitReverse(row, log_h);
     const omega = T.root(n);
 
-    return omega.pow(e);
+    return shift.mul(omega.pow(e));
 }
 
 /// out[row] = (lo+hi)/2 + (beta/(2*x))*(lo-hi),
 /// where x is the domain point for this pair.
 fn foldRow(n: usize, row: usize, lo: T, hi: T, beta: T) T {
+    return foldRowShift(n, row, lo, hi, beta, T.one);
+}
+
+/// Coset-aware fold. `shift` is expected to be on the unit circle, so
+/// `1 / (shift*w^e)` is its conjugate.
+fn foldRowShift(n: usize, row: usize, lo: T, hi: T, beta: T, shift: T) T {
     const half: T.InnerType = 0.5;
 
-    const x = domainPointForRowBitrev(n, row);
+    const x = domainPointForRowBitrevShift(n, row, shift);
     // Unit circle => x^{-1} = conj(x).
     const inv_x = x.con();
 
@@ -55,6 +67,7 @@ fn foldLayerInPlace(
     in_vals: []const T, // length n
     out_vals: []T, // length n/2
     beta: T,
+    shift: T,
 ) void {
     std.debug.assert(in_vals.len == n);
     std.debug.assert(out_vals.len == n / 2);
@@ -64,8 +77,17 @@ fn foldLayerInPlace(
     while (row < n / 2) : (row += 1) {
         const even = in_vals[2 * row];
         const odd = in_vals[2 * row + 1];
-        out_vals[row] = foldRow(n, row, even, odd, beta);
+        out_vals[row] = foldRowShift(n, row, even, odd, beta, shift);
     }
+}
+
+fn squareTimes(x: T, times: usize) T {
+    var result = x;
+    var i: usize = 0;
+    while (i < times) : (i += 1) {
+        result = result.mul(result);
+    }
+    return result;
 }
 
 /// In-place radix-2 DIT FFT.
@@ -114,6 +136,10 @@ pub const Config = struct {
 
     /// Claimed initial degree bound (in coefficient index). Must be < n.
     degree_bound: usize,
+
+    /// Multiplicative domain shift. For the current fold formula this should
+    /// stay on the unit circle; `T.cis(theta)` is the intended constructor.
+    domain_shift: T = T.one,
 
     pub fn n(self: Config) usize {
         return @as(usize, 1) << self.log_n;
@@ -196,6 +222,7 @@ pub fn prove(
     defer allocator.free(betas);
 
     // Build commitments and fold forward.
+    var layer_shift = cfg.domain_shift;
     var i: usize = 0;
     while (i < rounds_count) : (i += 1) {
         const n_i = n0 >> @intCast(i);
@@ -223,7 +250,8 @@ pub fn prove(
 
         // Allocate and compute next layer (size halves).
         layers_vals[i + 1] = try allocator.alloc(T, m_i);
-        foldLayerInPlace(n_i, layers_vals[i], layers_vals[i + 1], betas[i]);
+        foldLayerInPlace(n_i, layers_vals[i], layers_vals[i + 1], betas[i], layer_shift);
+        layer_shift = layer_shift.mul(layer_shift);
     }
 
     // Final evals are layers_vals[R], length = n_fin.
@@ -324,6 +352,7 @@ pub fn verify(
     const n0 = cfg.n();
     const n_fin = cfg.finalN();
     const n_rounds = cfg.rounds();
+    const final_shift = squareTimes(cfg.domain_shift, n_rounds);
 
     if (proof.roots.len != n_rounds) return false;
     if (proof.final_evals.len != n_fin) return false;
@@ -352,6 +381,7 @@ pub fn verify(
     var q: usize = 0;
     while (q < cfg.num_queries) : (q += 1) {
         var idx: usize = ch.sampleIndexPow2(n0);
+        var layer_shift = cfg.domain_shift;
 
         // For fold checks, we need to compare expected next value to actual next layer value.
         i = 0;
@@ -378,7 +408,7 @@ pub fn verify(
             const hi = opening_i.odd;
             const cur = if (is_even) lo else hi;
 
-            const expected_next = foldRow(n_i, pair_idx, lo, hi, betas[i]);
+            const expected_next = foldRowShift(n_i, pair_idx, lo, hi, betas[i], layer_shift);
 
             const next_idx = pair_idx;
 
@@ -400,6 +430,7 @@ pub fn verify(
             // `cur` is not directly used further (kept for clarity).
             _ = cur;
             idx = next_idx;
+            layer_shift = layer_shift.mul(layer_shift);
         }
     }
 
@@ -411,6 +442,12 @@ pub fn verify(
     @memcpy(coeffs, proof.final_evals);
 
     fftBitrevInPlace(coeffs, true);
+    const final_shift_inv = final_shift.inv(cfg.delta_final);
+    var shift_power = T.one;
+    for (coeffs) |*c| {
+        c.* = c.*.mul(shift_power);
+        shift_power = shift_power.mul(final_shift_inv);
+    }
 
     // Degree bound after R folds: floor(degree_bound / 2^R).
     const deg_fin = @min(cfg.degree_bound >> @intCast(n_rounds), n_fin);

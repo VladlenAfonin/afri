@@ -58,4 +58,40 @@ pub fn build(b: *std.Build) void {
 
     const fri_run_step = b.step("bench-fri", "Run the FRI benchmarks");
     fri_run_step.dependOn(&fri_run.step);
+
+    const stark_bench = b.addExecutable(.{
+        .name = "stark_bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/fri/stark_bench.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    stark_bench.root_module.addImport("zbench", zbench);
+
+    const stark_run = b.addRunArtifact(stark_bench);
+    if (b.args) |args| {
+        stark_run.addArgs(args);
+    }
+
+    const stark_run_step = b.step("bench-stark", "Run the STARK benchmarks");
+    stark_run_step.dependOn(&stark_run.step);
+
+    const astark_bench = b.addExecutable(.{
+        .name = "astark_bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/afri/astark_bench.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    astark_bench.root_module.addImport("zbench", zbench);
+
+    const astark_run = b.addRunArtifact(astark_bench);
+    if (b.args) |args| {
+        astark_run.addArgs(args);
+    }
+
+    const astark_run_step = b.step("bench-astark", "Run the ASTARK benchmarks");
+    astark_run_step.dependOn(&astark_run.step);
 }
