@@ -4,7 +4,7 @@ const merkle = @import("merkle.zig");
 const challenger_mod = @import("challenger.zig");
 const utils = @import("utils.zig");
 
-pub const T = complex.c32;
+pub const T = complex.c64;
 
 fn leafDigestPairT(even: T, odd: T) merkle.Digest {
     const n = @sizeOf(T);

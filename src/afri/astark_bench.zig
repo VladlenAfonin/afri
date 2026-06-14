@@ -177,17 +177,19 @@ const AstarkBenchmark = struct {
     ) !Self {
         const log_blowup: u6 = 2;
         const trace_len = @as(usize, 1) << log_trace_len;
+        const eval_len = trace_len << log_blowup;
+        const shift_angle: f32 = std.math.pi / @as(f32, @floatFromInt(eval_len));
         const config: astark.Config = .{
             .log_trace_len = log_trace_len,
             .log_blowup = log_blowup,
             .afri_config = .{
                 .log_n = log_trace_len + log_blowup,
-                .log_final_n = 0,
+                .log_final_n = 3,
                 .num_queries = 16,
                 .delta_fold = 8e-2,
                 .delta_final = 8e-2,
-                .degree_bound = @as(usize, 1) << @intCast(log_trace_len + log_blowup),
-                .domain_shift = T.cis(0.37),
+                .degree_bound = @as(usize, 1) << @intCast(log_trace_len),
+                .domain_shift = T.cis(shift_angle),
             },
             .delta_constraint = 2e-1,
             .delta_divisor = 1e-5,

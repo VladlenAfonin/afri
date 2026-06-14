@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const afri = @import("afri.zig");
-const complex = @import("complex.zig");
 const utils = @import("utils.zig");
 const merkle = @import("merkle.zig");
 const challenger_mod = @import("challenger.zig");
@@ -321,142 +320,10 @@ fn nextIndexBitrev(log_n: usize, idx_bitrev: usize, step: usize) usize {
     return utils.bitReverse(next_exponent, log_n);
 }
 
-fn makeTransitionZerofier(
-    allocator: std.mem.Allocator,
-    log_trace_len: u6,
-) ![]T {
-    const trace_len = @as(usize, 1) << log_trace_len;
-    const coeffs = try allocator.alloc(T, trace_len);
-    errdefer allocator.free(coeffs);
-
-    const last_root = pointForTraceRow(log_trace_len, trace_len - 1);
-    coeffs[trace_len - 1] = T.one;
-    var i = trace_len - 1;
-    while (i > 0) {
-        coeffs[i - 1] = coeffs[i].mul(last_root);
-        i -= 1;
-    }
-
-    return coeffs;
-}
-
 fn evalTransitionZerofier(config: Config, x: T) T {
     const trace_len = config.traceLen();
     const last_root = pointForTraceRow(config.log_trace_len, trace_len - 1);
     return x.pow(trace_len).sub(T.one).div(x.sub(last_root), config.delta_divisor);
-}
-
-fn divideByMonic(
-    allocator: std.mem.Allocator,
-    numerator: []const T,
-    denominator: []const T,
-) ![]T {
-    std.debug.assert(denominator.len > 0);
-
-    if (numerator.len < denominator.len) {
-        const quotient = try allocator.alloc(T, 1);
-        quotient[0] = T.zero;
-        return quotient;
-    }
-
-    const rem = try allocator.alloc(T, numerator.len);
-    defer allocator.free(rem);
-    @memcpy(rem, numerator);
-
-    const quotient_len = numerator.len - denominator.len + 1;
-    const quotient = try allocator.alloc(T, quotient_len);
-    errdefer allocator.free(quotient);
-    for (quotient) |*q| q.* = T.zero;
-
-    var k = quotient_len;
-    while (k > 0) {
-        k -= 1;
-        const coeff = rem[k + denominator.len - 1];
-        quotient[k] = coeff;
-
-        var j: usize = 0;
-        while (j < denominator.len) : (j += 1) {
-            rem[k + j] = rem[k + j].sub(denominator[j].mul(coeff));
-        }
-    }
-
-    return quotient;
-}
-
-fn boundaryQuotient(
-    allocator: std.mem.Allocator,
-    trace_coeffs: []const T,
-    root: T,
-    value: T,
-) ![]T {
-    const numerator = try allocator.alloc(T, trace_coeffs.len);
-    defer allocator.free(numerator);
-    @memcpy(numerator, trace_coeffs);
-    numerator[0] = numerator[0].sub(value);
-
-    const denominator = [_]T{ root.neg(), T.one };
-    return divideByMonic(allocator, numerator, &denominator);
-}
-
-fn transitionQuotient(
-    allocator: std.mem.Allocator,
-    tc: TransitionConstraint,
-    trace_evals: []const []const T,
-    config: Config,
-) ![]T {
-    const n = config.evalLen();
-    const width = trace_evals.len;
-    const blowup = @as(usize, 1) << config.log_blowup;
-    const omega = T.root(n);
-
-    const current = try allocator.alloc(T, width);
-    defer allocator.free(current);
-    const next = try allocator.alloc(T, width);
-    defer allocator.free(next);
-
-    const evals = try allocator.alloc(T, n);
-    defer allocator.free(evals);
-
-    var x = T.one;
-    var idx: usize = 0;
-    while (idx < n) : (idx += 1) {
-        const next_idx = (idx + blowup) & (n - 1);
-        for (current, 0..) |*v, col| v.* = trace_evals[col][idx];
-        for (next, 0..) |*v, col| v.* = trace_evals[col][next_idx];
-        evals[idx] = tc(x, current, next);
-        x = x.mul(omega);
-    }
-
-    fftNatural(evals, true);
-
-    const zerofier = try makeTransitionZerofier(allocator, config.log_trace_len);
-    defer allocator.free(zerofier);
-
-    return divideByMonic(allocator, evals, zerofier);
-}
-
-fn addScaled(dst: []T, src: []const T, weight: T) void {
-    for (src, 0..) |c, i| {
-        dst[i] = dst[i].add(c.mul(weight));
-    }
-}
-
-fn buildCompositionCoeffs(
-    allocator: std.mem.Allocator,
-    quotients: []const []const T,
-    weights: []const T,
-) ![]T {
-    std.debug.assert(quotients.len == weights.len);
-
-    var max_len: usize = 1;
-    for (quotients) |q| max_len = @max(max_len, q.len);
-
-    const composition = try allocator.alloc(T, max_len);
-    errdefer allocator.free(composition);
-    for (composition) |*c| c.* = T.zero;
-
-    for (quotients, weights) |q, w| addScaled(composition, q, w);
-    return composition;
 }
 
 fn compositionAt(
@@ -485,6 +352,43 @@ fn compositionAt(
     }
 
     return acc;
+}
+
+fn buildCompositionEvals(
+    allocator: std.mem.Allocator,
+    config: Config,
+    air: Air,
+    weights: []const T,
+    trace_coset_evals: []const []const T,
+) ![]T {
+    const eval_len = config.evalLen();
+    const width = air.width;
+    const log_eval_len = config.log_trace_len + config.log_blowup;
+    const blowup = @as(usize, 1) << config.log_blowup;
+
+    const current = try allocator.alloc(T, width);
+    defer allocator.free(current);
+    const next = try allocator.alloc(T, width);
+    defer allocator.free(next);
+
+    const values = try allocator.alloc(T, eval_len);
+    errdefer allocator.free(values);
+
+    var idx: usize = 0;
+    while (idx < eval_len) : (idx += 1) {
+        const next_idx = nextIndexBitrev(log_eval_len, idx, blowup);
+        for (current, 0..) |*v, col| v.* = trace_coset_evals[col][idx];
+        for (next, 0..) |*v, col| v.* = trace_coset_evals[col][next_idx];
+
+        const x = cosetPointFromBitrev(
+            log_eval_len,
+            idx,
+            config.afri_config.domain_shift,
+        );
+        values[idx] = compositionAt(config, air, weights, x, current, next);
+    }
+
+    return values;
 }
 
 fn deriveAfriQueryIndices(
@@ -576,52 +480,12 @@ pub fn prove(
     defer allocator.free(weights);
     deriveWeights(config, air, trace_root, weights);
 
-    const quotients = try allocator.alloc([]T, n_quotients);
-    defer allocator.free(quotients);
-    var initialized_quotients: usize = 0;
-    defer {
-        for (quotients[0..initialized_quotients]) |q| allocator.free(q);
-    }
-
-    const trace_natural_evals = try evalColumnsOnCoset(
+    const composition_evals = try buildCompositionEvals(
         allocator,
-        trace_coeffs,
-        eval_len,
-        T.one,
-        false,
-    );
-    defer freeColumns(allocator, trace_natural_evals);
-
-    for (air.transitions) |tc| {
-        quotients[initialized_quotients] = try transitionQuotient(
-            allocator,
-            tc,
-            trace_natural_evals,
-            config,
-        );
-        initialized_quotients += 1;
-    }
-
-    for (air.boundaries) |bc| {
-        const point = pointForTraceRow(config.log_trace_len, bc.row);
-        quotients[initialized_quotients] = try boundaryQuotient(
-            allocator,
-            trace_coeffs[bc.column],
-            point,
-            bc.value,
-        );
-        initialized_quotients += 1;
-    }
-
-    const composition_coeffs = try buildCompositionCoeffs(allocator, quotients, weights);
-    defer allocator.free(composition_coeffs);
-
-    const composition_evals = try evalPolyOnCoset(
-        allocator,
-        composition_coeffs,
-        eval_len,
-        config.afri_config.domain_shift,
-        true,
+        config,
+        air,
+        weights,
+        trace_coset_evals,
     );
     defer allocator.free(composition_evals);
 
@@ -788,17 +652,20 @@ fn factorialValueTransition(_: T, current: []const T, next: []const T) T {
 
 fn testConfig(log_trace_len: u6) Config {
     const log_blowup: u6 = 2;
+    const trace_len = @as(usize, 1) << @intCast(log_trace_len);
+    const eval_len = trace_len << log_blowup;
+    const shift_angle: f32 = std.math.pi / @as(f32, @floatFromInt(eval_len));
     return .{
         .log_trace_len = log_trace_len,
         .log_blowup = log_blowup,
         .afri_config = .{
             .log_n = log_trace_len + log_blowup,
-            .log_final_n = 0,
+            .log_final_n = 3,
             .num_queries = 16,
             .delta_fold = 8e-2,
             .delta_final = 8e-2,
-            .degree_bound = @as(usize, 1) << @intCast(log_trace_len + log_blowup),
-            .domain_shift = T.cis(0.37),
+            .degree_bound = @as(usize, 1) << @intCast(log_trace_len),
+            .domain_shift = T.cis(shift_angle),
         },
         .delta_constraint = 2e-1,
         .delta_divisor = 1e-5,
@@ -836,6 +703,31 @@ fn makeFactorialTrace(allocator: std.mem.Allocator, n: usize) ![]T {
 test "astark proves and verifies counter AIR" {
     const allocator = std.testing.allocator;
     const cfg = testConfig(3);
+    const trace_len = cfg.traceLen();
+
+    const transitions = [_]TransitionConstraint{counterTransition};
+    const boundaries = [_]BoundaryConstraint{
+        .{ .row = 0, .column = 0, .value = T.zero },
+        .{ .row = trace_len - 1, .column = 0, .value = real(@floatFromInt(trace_len - 1)) },
+    };
+    const air: Air = .{
+        .width = 1,
+        .transitions = &transitions,
+        .boundaries = &boundaries,
+    };
+
+    const trace = try makeCounterTrace(allocator, trace_len);
+    defer allocator.free(trace);
+
+    var proof = try prove(allocator, cfg, air, trace);
+    defer proof.deinit(allocator);
+
+    try std.testing.expect(verify(allocator, cfg, air, &proof));
+}
+
+test "astark proves and verifies counter AIR at log 6" {
+    const allocator = std.testing.allocator;
+    const cfg = testConfig(6);
     const trace_len = cfg.traceLen();
 
     const transitions = [_]TransitionConstraint{counterTransition};
