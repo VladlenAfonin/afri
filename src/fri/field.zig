@@ -95,8 +95,35 @@ pub const Goldilocks = struct {
 
     pub fn inv(a: Self) Self {
         if (a.eq(Self.zero)) @panic("Goldilocks.inv: inverse of zero");
-        // Fermat: a^(p-2) mod p, since p is prime.
-        return pow(a, p - 2);
+        return .{ .value = invXgcd(a.value) };
+    }
+
+    fn invXgcd(x: InnerType) InnerType {
+        var r0: ExtendedType = p_ext;
+        var r1: ExtendedType = @as(ExtendedType, x);
+        var t0: ExtendedType = 0;
+        var t1: ExtendedType = 1;
+        var n: usize = 0;
+
+        while (r1 != 0) : (n += 1) {
+            const q = r0 / r1;
+            const qr1 = q * r1;
+            const next_r = if (r0 > qr1) r0 - qr1 else qr1 - r0;
+            const next_t = t0 + q * t1;
+
+            r0 = r1;
+            r1 = next_r;
+            t0 = t1;
+            t1 = next_t;
+        }
+
+        std.debug.assert(r0 == 1);
+        std.debug.assert(t0 < p_ext);
+
+        if ((n & 1) == 0) {
+            t0 = p_ext - t0;
+        }
+        return @intCast(t0);
     }
 
     pub fn div(a: Self, b: Self) Self {
@@ -219,10 +246,23 @@ test "Goldilocks mul" {
 }
 
 test "Goldilocks inv * mul" {
-    const a = Goldilocks.fromComptimeInt(5);
-    const inv_a = a.inv();
-    const one = Goldilocks.mul(a, inv_a);
-    try expectEqual(one, Goldilocks.one);
+    const values = [_]Goldilocks.InnerType{
+        1,
+        2,
+        3,
+        5,
+        0xffff_ffff,
+        0x1_0000_0000,
+        Goldilocks.p - 2,
+        Goldilocks.p - 1,
+    };
+
+    for (values) |value| {
+        const a = Goldilocks.fromInner(value);
+        const inv_a = a.inv();
+        const one = Goldilocks.mul(a, inv_a);
+        try expectEqual(one, Goldilocks.one);
+    }
 }
 
 test "two-adic generator basic sanity" {
