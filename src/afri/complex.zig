@@ -2,6 +2,7 @@ const std = @import("std");
 const utils = @import("utils.zig");
 
 pub const c32 = Complex(f32);
+pub const c64 = Complex(f64);
 
 pub fn Complex(comptime InnerTypeIn: type) type {
     return struct {
