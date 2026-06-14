@@ -308,147 +308,11 @@ fn nextIndexBitrev(log_n: usize, idx_bitrev: usize, step: usize) usize {
     return utils.bitReverse(next_exponent, log_n);
 }
 
-fn makeTransitionZerofier(
-    allocator: std.mem.Allocator,
-    log_trace_len: u6,
-) ![]F {
-    const trace_len = @as(usize, 1) << log_trace_len;
-    const coeffs = try allocator.alloc(F, trace_len);
-    errdefer allocator.free(coeffs);
-
-    const omega_trace = F.twoAdicGenerator(log_trace_len);
-    const last_root = F.pow(omega_trace, @intCast(trace_len - 1));
-
-    coeffs[trace_len - 1] = F.one;
-    var i = trace_len - 1;
-    while (i > 0) {
-        coeffs[i - 1] = coeffs[i].mul(last_root);
-        i -= 1;
-    }
-
-    return coeffs;
-}
-
 fn evalTransitionZerofier(log_trace_len: u6, x: F) F {
     const trace_len = @as(usize, 1) << log_trace_len;
     const omega_trace = F.twoAdicGenerator(log_trace_len);
     const last_root = F.pow(omega_trace, @intCast(trace_len - 1));
     return F.pow(x, @intCast(trace_len)).sub(F.one).div(x.sub(last_root));
-}
-
-fn divideByMonic(
-    allocator: std.mem.Allocator,
-    numerator: []const F,
-    denominator: []const F,
-) ![]F {
-    std.debug.assert(denominator.len > 0);
-    std.debug.assert(denominator[denominator.len - 1].eq(F.one));
-
-    if (numerator.len < denominator.len) {
-        const quotient = try allocator.alloc(F, 1);
-        quotient[0] = F.zero;
-        return quotient;
-    }
-
-    const rem = try allocator.alloc(F, numerator.len);
-    defer allocator.free(rem);
-    @memcpy(rem, numerator);
-
-    const quotient_len = numerator.len - denominator.len + 1;
-    const quotient = try allocator.alloc(F, quotient_len);
-    errdefer allocator.free(quotient);
-    for (quotient) |*q| q.* = F.zero;
-
-    var k = quotient_len;
-    while (k > 0) {
-        k -= 1;
-        const coeff = rem[k + denominator.len - 1];
-        quotient[k] = coeff;
-
-        var j: usize = 0;
-        while (j < denominator.len) : (j += 1) {
-            const t = denominator[j].mul(coeff);
-            rem[k + j].subAssign(t);
-        }
-    }
-
-    return quotient;
-}
-
-fn boundaryQuotient(
-    allocator: std.mem.Allocator,
-    trace_coeffs: []const F,
-    root: F,
-    value: F,
-) ![]F {
-    var numerator = try allocator.alloc(F, trace_coeffs.len);
-    defer allocator.free(numerator);
-    @memcpy(numerator, trace_coeffs);
-    numerator[0].subAssign(value);
-
-    const denominator = [_]F{ F.zero.sub(root), F.one };
-    return divideByMonic(allocator, numerator, &denominator);
-}
-
-fn transitionQuotient(
-    allocator: std.mem.Allocator,
-    tc: TransitionConstraint,
-    trace_evals: []const []const F,
-    config: Config,
-) ![]F {
-    const n = config.evalLen();
-    const width = trace_evals.len;
-    const blowup = @as(usize, 1) << config.log_blowup;
-    const omega = F.twoAdicGenerator(config.log_trace_len + config.log_blowup);
-
-    const current = try allocator.alloc(F, width);
-    defer allocator.free(current);
-    const next = try allocator.alloc(F, width);
-    defer allocator.free(next);
-
-    const evals = try allocator.alloc(F, n);
-    defer allocator.free(evals);
-
-    var x = F.one;
-    var idx: usize = 0;
-    while (idx < n) : (idx += 1) {
-        const next_idx = (idx + blowup) & (n - 1);
-        for (current, 0..) |*v, col| v.* = trace_evals[col][idx];
-        for (next, 0..) |*v, col| v.* = trace_evals[col][next_idx];
-        evals[idx] = tc(x, current, next);
-        x.mulAssign(omega);
-    }
-
-    fft.fftInPlace(evals, true);
-
-    const zerofier = try makeTransitionZerofier(allocator, config.log_trace_len);
-    defer allocator.free(zerofier);
-
-    return divideByMonic(allocator, evals, zerofier);
-}
-
-fn addScaled(dst: []F, src: []const F, weight: F) void {
-    for (src, 0..) |c, i| {
-        dst[i].addAssign(c.mul(weight));
-    }
-}
-
-fn buildCompositionCoeffs(
-    allocator: std.mem.Allocator,
-    quotients: []const []const F,
-    weights: []const F,
-) ![]F {
-    std.debug.assert(quotients.len == weights.len);
-
-    var max_len: usize = 1;
-    for (quotients) |q| max_len = @max(max_len, q.len);
-
-    const composition = try allocator.alloc(F, max_len);
-    errdefer allocator.free(composition);
-    for (composition) |*c| c.* = F.zero;
-
-    for (quotients, weights) |q, w| addScaled(composition, q, w);
-    return composition;
 }
 
 fn compositionAt(
@@ -477,6 +341,56 @@ fn compositionAt(
     }
 
     return acc;
+}
+
+fn buildCompositionEvals(
+    allocator: std.mem.Allocator,
+    config: Config,
+    air: Air,
+    weights: []const F,
+    trace_coset_evals: []const []const F,
+) ![]F {
+    const eval_len = config.evalLen();
+    const width = air.width;
+    const log_eval_len = config.log_trace_len + config.log_blowup;
+    const blowup = @as(usize, 1) << config.log_blowup;
+
+    const current = try allocator.alloc(F, width);
+    defer allocator.free(current);
+    const next = try allocator.alloc(F, width);
+    defer allocator.free(next);
+
+    const values = try allocator.alloc(F, eval_len);
+    errdefer allocator.free(values);
+
+    var idx: usize = 0;
+    while (idx < eval_len) : (idx += 1) {
+        const next_idx = nextIndexBitrev(log_eval_len, idx, blowup);
+        for (current, 0..) |*v, col| v.* = trace_coset_evals[col][idx];
+        for (next, 0..) |*v, col| v.* = trace_coset_evals[col][next_idx];
+
+        const x = cosetPointFromBitrev(
+            log_eval_len,
+            idx,
+            config.fri_config.domain_shift,
+        );
+        values[idx] = compositionAt(config, air, weights, x, current, next);
+    }
+
+    return values;
+}
+
+fn projectToTraceDegreeInPlace(config: Config, values_bitrev: []F) void {
+    std.debug.assert(values_bitrev.len == config.evalLen());
+
+    utils.bitReversePermutation(F, values_bitrev);
+    fft.fftInPlace(values_bitrev, true);
+
+    const degree_bound = config.traceLen();
+    for (values_bitrev[degree_bound..]) |*c| c.* = F.zero;
+
+    fft.fftInPlace(values_bitrev, false);
+    utils.bitReversePermutation(F, values_bitrev);
 }
 
 fn validateInputs(config: Config, air: Air, trace: []const F) bool {
@@ -537,54 +451,15 @@ pub fn prove(
     defer allocator.free(weights);
     deriveWeights(config, air, trace_root, weights);
 
-    var quotients = try allocator.alloc([]F, n_quotients);
-    defer allocator.free(quotients);
-    var initialized_quotients: usize = 0;
-    defer {
-        for (quotients[0..initialized_quotients]) |q| allocator.free(q);
-    }
-
-    const trace_natural_evals = try evalColumnsOnCoset(
+    const composition_evals = try buildCompositionEvals(
         allocator,
-        trace_coeffs,
-        eval_len,
-        F.one,
-        false,
-    );
-    defer freeColumns(allocator, trace_natural_evals);
-
-    for (air.transitions) |tc| {
-        quotients[initialized_quotients] = try transitionQuotient(
-            allocator,
-            tc,
-            trace_natural_evals,
-            config,
-        );
-        initialized_quotients += 1;
-    }
-
-    for (air.boundaries) |bc| {
-        const point = pointForTraceRow(config.log_trace_len, bc.row);
-        quotients[initialized_quotients] = try boundaryQuotient(
-            allocator,
-            trace_coeffs[bc.column],
-            point,
-            bc.value,
-        );
-        initialized_quotients += 1;
-    }
-
-    const composition_coeffs = try buildCompositionCoeffs(allocator, quotients, weights);
-    defer allocator.free(composition_coeffs);
-
-    const composition_evals = try evalPolyOnCoset(
-        allocator,
-        composition_coeffs,
-        eval_len,
-        config.fri_config.domain_shift,
-        true,
+        config,
+        air,
+        weights,
+        trace_coset_evals,
     );
     defer allocator.free(composition_evals);
+    projectToTraceDegreeInPlace(config, composition_evals);
 
     var composition_proof = try fri.prove(allocator, config.fri_config, composition_evals);
     errdefer composition_proof.deinit(allocator);
