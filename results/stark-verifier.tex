@@ -1,0 +1,42 @@
+\documentclass{standalone}
+
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+
+\usepackage[main = russian, english]{babel}
+\usepackage{unicode-math}
+% \setmathfont{Cambria Math}
+\usepackage{pgfplots}
+
+\begin{document}
+\begin{tikzpicture}
+    \begin{axis}[
+        title = {Проверяющий},
+        xlabel = {Длина вычислительного следа},
+        ylabel = {Время работы, мс},
+        xticklabel = {$2^{\pgfmathprintnumber{\tick}}$},
+        grid = major,
+        legend entries = {aSTARK,STARK},
+        legend pos = north west
+    ]
+        \addplot [
+            color = red,
+            mark = *
+        ] table [
+            y expr = \thisrow{avg} / 1000000,
+            x = benchmark,
+            y = avg,
+            col sep = comma
+        ] {astark-verifier.csv};
+        \addplot [
+            color = blue,
+            mark = square
+        ] table [
+            y expr = \thisrow{avg} / 1000000,
+            x = benchmark,
+            y = avg,
+            col sep = comma
+        ] {stark-verifier.csv};
+    \end{axis}
+\end{tikzpicture}
+\end{document}
