@@ -1,5 +1,8 @@
 const std = @import("std");
 
+const fri_streebog = @import("fri/streebog.zig");
+const fri_sha3 = @import("fri/sha3.zig");
+
 const afri_complex = @import("afri/complex.zig");
 const afri_merkle = @import("afri/merkle.zig");
 const afri_challenger = @import("afri/challenger.zig");
@@ -15,6 +18,9 @@ const fri = @import("fri/fri.zig");
 const stark = @import("fri/stark.zig");
 
 test "aggregate" {
+    _ = fri_streebog;
+    _ = fri_sha3;
+
     // aFRI.
     _ = afri_complex;
     _ = afri_merkle;
