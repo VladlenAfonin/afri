@@ -1,30 +1,31 @@
 const std = @import("std");
 const merkle = @import("merkle.zig");
 const utils = @import("utils.zig");
+const common = @import("common");
 
-const Sha256 = std.crypto.hash.sha2.Sha256;
+const Hash = common.Hash;
 
 pub const Challenger = struct {
-    state: [Sha256.digest_length]u8,
+    state: [Hash.digest_length]u8,
     counter: u64,
 
     const Self = @This();
 
     pub fn init() Self {
         return .{
-            .state = [_]u8{0} ** Sha256.digest_length,
+            .state = [_]u8{0} ** Hash.digest_length,
             .counter = 0,
         };
     }
 
     pub fn observeBytes(self: *Self, data: []const u8) void {
-        var hasher = Sha256.init(.{});
+        var hasher = Hash.init(.{});
         hasher.update(&self.state);
         const ctr = utils.encode(u64, self.counter, .big);
         hasher.update(&ctr);
         hasher.update(data);
 
-        var out: [Sha256.digest_length]u8 = undefined;
+        var out: [Hash.digest_length]u8 = undefined;
         hasher.final(&out);
 
         self.state = out;
@@ -35,13 +36,13 @@ pub const Challenger = struct {
         self.observeBytes(d[0..]);
     }
 
-    fn squeeze(self: *Self) [Sha256.digest_length]u8 {
-        var hasher = Sha256.init(.{});
+    fn squeeze(self: *Self) [Hash.digest_length]u8 {
+        var hasher = Hash.init(.{});
         hasher.update(&self.state);
         const ctr = utils.encode(u64, self.counter, .big);
         hasher.update(&ctr);
 
-        var out: [Sha256.digest_length]u8 = undefined;
+        var out: [Hash.digest_length]u8 = undefined;
         hasher.final(&out);
 
         self.state = out;

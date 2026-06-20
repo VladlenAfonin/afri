@@ -1,4 +1,5 @@
 const std = @import("std");
+const common = @import("common");
 
 const fri = @import("fri.zig");
 const field = @import("field.zig");
@@ -10,7 +11,7 @@ const challenger_mod = @import("challenger.zig");
 pub const F = field.Goldilocks;
 const Challenger = challenger_mod.Challenger;
 const Digest = merkle.Digest;
-const Sha256 = std.crypto.hash.sha2.Sha256;
+const Hash = common.Hash;
 
 pub const BoundaryConstraint = struct {
     row: usize,
@@ -139,25 +140,25 @@ const TraceMerkleTree = struct {
 
 fn hashBytes(bytes: []const u8) Digest {
     var out: Digest = undefined;
-    Sha256.hash(bytes, &out, .{});
+    Hash.hash(bytes, &out, .{});
     return out;
 }
 
 fn hashNode(left: Digest, right: Digest) Digest {
-    var buf: [2 * Sha256.digest_length]u8 = undefined;
-    @memcpy(buf[0..Sha256.digest_length], &left);
-    @memcpy(buf[Sha256.digest_length..][0..Sha256.digest_length], &right);
+    var buf: [2 * Hash.digest_length]u8 = undefined;
+    @memcpy(buf[0..Hash.digest_length], &left);
+    @memcpy(buf[Hash.digest_length..][0..Hash.digest_length], &right);
     return hashBytes(&buf);
 }
 
-fn updateField(hasher: *Sha256, x: F) void {
+fn updateField(hasher: *Hash, x: F) void {
     var bytes: [8]u8 = undefined;
     std.mem.writeInt(u64, &bytes, x.value, .little);
     hasher.update(&bytes);
 }
 
 fn digestColumnsRow(columns: []const []const F, row: usize) Digest {
-    var hasher = Sha256.init(.{});
+    var hasher = Hash.init(.{});
     for (columns) |column| updateField(&hasher, column[row]);
 
     var out: Digest = undefined;
@@ -166,7 +167,7 @@ fn digestColumnsRow(columns: []const []const F, row: usize) Digest {
 }
 
 fn digestRow(row: []const F) Digest {
-    var hasher = Sha256.init(.{});
+    var hasher = Hash.init(.{});
     for (row) |x| updateField(&hasher, x);
 
     var out: Digest = undefined;

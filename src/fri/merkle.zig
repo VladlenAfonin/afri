@@ -1,16 +1,17 @@
 const std = @import("std");
 const field = @import("field.zig");
 const utils = @import("utils.zig");
+const common = @import("common");
 
 const Goldilocks = field.Goldilocks;
 const F = Goldilocks;
-const Sha256 = std.crypto.hash.sha2.Sha256;
+const Hash = common.Hash;
 
-pub const Digest = [Sha256.digest_length]u8;
+pub const Digest = common.Digest;
 
 fn hashBytes(bytes: []const u8) Digest {
     var out: Digest = undefined;
-    Sha256.hash(bytes, &out, .{});
+    Hash.hash(bytes, &out, .{});
     return out;
 }
 
@@ -35,9 +36,9 @@ pub fn leafDigestGoldilocksPair(lo: F, hi: F) Digest {
 }
 
 fn hashNode(left: Digest, right: Digest) Digest {
-    var buf: [2 * Sha256.digest_length]u8 = undefined;
-    @memcpy(buf[0..Sha256.digest_length], left[0..]);
-    @memcpy(buf[Sha256.digest_length..][0..Sha256.digest_length], right[0..]);
+    var buf: [2 * Hash.digest_length]u8 = undefined;
+    @memcpy(buf[0..Hash.digest_length], left[0..]);
+    @memcpy(buf[Hash.digest_length..][0..Hash.digest_length], right[0..]);
     return hashBytes(&buf);
 }
 

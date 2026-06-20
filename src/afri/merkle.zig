@@ -1,20 +1,21 @@
 const std = @import("std");
 const utils = @import("utils.zig");
+const common = @import("common");
 
-pub const Sha256 = std.crypto.hash.sha2.Sha256;
-pub const Digest = [Sha256.digest_length]u8;
+pub const Hash = common.Hash;
+pub const Digest = common.Digest;
 
 pub fn hashBytes(bytes: []const u8) Digest {
     var out: Digest = undefined;
-    Sha256.hash(bytes, &out, .{});
+    Hash.hash(bytes, &out, .{});
     return out;
 }
 
 fn hashNode(left: Digest, right: Digest) Digest {
-    var buf: [2 * Sha256.digest_length]u8 = undefined;
-    @memcpy(buf[0..Sha256.digest_length], &left);
+    var buf: [2 * Hash.digest_length]u8 = undefined;
+    @memcpy(buf[0..Hash.digest_length], &left);
     @memcpy(
-        buf[Sha256.digest_length .. 2 * Sha256.digest_length],
+        buf[Hash.digest_length .. 2 * Hash.digest_length],
         &right,
     );
     return hashBytes(&buf);

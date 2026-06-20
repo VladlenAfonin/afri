@@ -1,18 +1,19 @@
 const std = @import("std");
 const field = @import("field.zig");
+const common = @import("common");
 
 const Goldilocks = field.Goldilocks;
-const Sha256 = std.crypto.hash.sha2.Sha256;
+const Hash = common.Hash;
 
 pub const Challenger = struct {
-    state: [Sha256.digest_length]u8,
+    state: [Hash.digest_length]u8,
     counter: u64,
 
     const Self = @This();
 
     pub fn init() Self {
         return .{
-            .state = [_]u8{0} ** Sha256.digest_length,
+            .state = [_]u8{0} ** Hash.digest_length,
             .counter = 0,
         };
     }
@@ -30,13 +31,13 @@ pub const Challenger = struct {
     }
 
     pub fn observeBytes(self: *Self, data: []const u8) void {
-        var hasher = Sha256.init(.{});
+        var hasher = Hash.init(.{});
         hasher.update(&self.state);
         const ctr = encodeCounter(self.counter);
         hasher.update(&ctr);
         hasher.update(data);
 
-        var out: [Sha256.digest_length]u8 = undefined;
+        var out: [Hash.digest_length]u8 = undefined;
         hasher.final(&out);
 
         self.state = out;
@@ -48,13 +49,13 @@ pub const Challenger = struct {
         self.observeBytes(bytes);
     }
 
-    fn squeeze(self: *Self) [Sha256.digest_length]u8 {
-        var hasher = Sha256.init(.{});
+    fn squeeze(self: *Self) [Hash.digest_length]u8 {
+        var hasher = Hash.init(.{});
         hasher.update(&self.state);
         const ctr = encodeCounter(self.counter);
         hasher.update(&ctr);
 
-        var out: [Sha256.digest_length]u8 = undefined;
+        var out: [Hash.digest_length]u8 = undefined;
         hasher.final(&out);
 
         self.state = out;
@@ -94,13 +95,13 @@ pub const Challenger = struct {
             // Possible optimization: move these 3 lines out of the loop, replace them with
             // var h = base;
             // and use this h instead of hasher.
-            var hasher = Sha256.init(.{});
+            var hasher = Hash.init(.{});
             hasher.update(&self.state);
             hasher.update("pow");
             const nonce_bytes = std.mem.asBytes(&nonce);
             hasher.update(nonce_bytes);
 
-            var out: [Sha256.digest_length]u8 = undefined;
+            var out: [Hash.digest_length]u8 = undefined;
             hasher.final(&out);
 
             if (leadingZeroBits(&out) >= pow_bits) {
@@ -114,13 +115,13 @@ pub const Challenger = struct {
     pub fn checkWitnessAndObserve(self: *Self, pow_bits: u8, nonce: u64) bool {
         if (pow_bits == 0) return nonce == 0;
 
-        var hasher = Sha256.init(.{});
+        var hasher = Hash.init(.{});
         hasher.update(&self.state);
         hasher.update("pow");
         const nonce_bytes = std.mem.asBytes(&nonce);
         hasher.update(nonce_bytes);
 
-        var out: [Sha256.digest_length]u8 = undefined;
+        var out: [Hash.digest_length]u8 = undefined;
         hasher.final(&out);
 
         if (leadingZeroBits(&out) < pow_bits) return false;
@@ -129,7 +130,7 @@ pub const Challenger = struct {
         return true;
     }
 
-    fn leadingZeroBits(d: *const [Sha256.digest_length]u8) u8 {
+    fn leadingZeroBits(d: *const [Hash.digest_length]u8) u8 {
         var count: u8 = 0;
         for (d.*) |b| {
             if (b == 0) {

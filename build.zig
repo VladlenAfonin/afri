@@ -1,8 +1,29 @@
 const std = @import("std");
 
+const HashFunction = enum {
+    sha2,
+    sha3,
+    streebog,
+};
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const hash = b.option(
+        HashFunction,
+        "hash",
+        "Select the 256-bit hash function (sha2, sha3, or streebog)",
+    ) orelse .sha2;
+
+    const build_options = b.addOptions();
+    build_options.addOption(HashFunction, "hash", hash);
+
+    const common = b.createModule(.{
+        .root_source_file = b.path("src/common.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    common.addOptions("build_options", build_options);
 
     // Tests.
     const test_compile = b.addTest(.{
@@ -12,6 +33,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    test_compile.root_module.addImport("common", common);
 
     const test_run = b.addRunArtifact(test_compile);
     const test_step = b.step("test", "Run tests");
@@ -32,6 +54,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     afri_bench.root_module.addImport("zbench", zbench);
+    afri_bench.root_module.addImport("common", common);
 
     const afri_run = b.addRunArtifact(afri_bench);
     if (b.args) |args| {
@@ -50,6 +73,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     fri_bench.root_module.addImport("zbench", zbench);
+    fri_bench.root_module.addImport("common", common);
 
     const fri_run = b.addRunArtifact(fri_bench);
     if (b.args) |args| {
@@ -68,6 +92,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     stark_bench.root_module.addImport("zbench", zbench);
+    stark_bench.root_module.addImport("common", common);
 
     const stark_run = b.addRunArtifact(stark_bench);
     if (b.args) |args| {
@@ -86,6 +111,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     astark_bench.root_module.addImport("zbench", zbench);
+    astark_bench.root_module.addImport("common", common);
 
     const astark_run = b.addRunArtifact(astark_bench);
     if (b.args) |args| {
