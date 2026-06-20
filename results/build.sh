@@ -23,11 +23,11 @@ case "$1" in
 esac
 
 case "$2" in
-    "prover" | "verifier")
+    "prover" | "verifier" | "prover-hash" | "verifier-hash")
         PARTY="$2"
         ;;
     *)
-        >&2 echo "error: unknown party: \"$2\" (available options: prover, verifier)"
+        >&2 echo "error: unknown party: \"$2\" (available options: prover, verifier, prover-hash, verifier-hash)"
         exit 1
         ;;
 esac
